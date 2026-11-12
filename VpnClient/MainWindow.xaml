@@ -1,0 +1,71 @@
+<Window x:Class="VpnClient.MainWindow" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Title="Pipidastr VPN" Width="1080" Height="760" MinWidth="880" MinHeight="660" WindowStartupLocation="CenterScreen" Background="{StaticResource Page}" Foreground="#F4F6FF" FontFamily="Segoe UI">
+  <Grid Margin="24">
+    <Grid.ColumnDefinitions><ColumnDefinition Width="285"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+    <Grid.RowDefinitions><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+    <Border Grid.Column="0" Background="{StaticResource Card}" CornerRadius="16" Padding="18">
+      <DockPanel>
+        <StackPanel DockPanel.Dock="Top">
+          <TextBlock Text="◈  PIPIDASTR VPN" FontWeight="Bold" FontSize="20" Margin="2,3,0,26"/>
+          <TextBlock Text="ПРОФИЛЬ" Foreground="{StaticResource Muted}" FontSize="11" FontWeight="Bold" Margin="2,0,0,8"/>
+          <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+            <ComboBox x:Name="ProfilesBox" SelectionChanged="ProfilesBox_SelectionChanged"/>
+            <Button Grid.Column="1" Width="36" Content="+" ToolTip="Новый профиль" Click="AddProfile_Click" Margin="6,0,0,0"/>
+          </Grid>
+          <Grid Margin="2,27,2,9"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+            <TextBlock Text="СЕРВЕРЫ" Foreground="{StaticResource Muted}" FontSize="11" FontWeight="Bold"/>
+            <TextBlock Grid.Column="1" x:Name="ServerCountText" Foreground="{StaticResource Muted}" FontSize="11" Text="0"/>
+          </Grid>
+        </StackPanel>
+        <StackPanel DockPanel.Dock="Bottom" Margin="0,8,0,0">
+          <Button Content="＋  Добавить ссылку сервера" Click="AddServer_Click" HorizontalAlignment="Stretch"/>
+          <Button Content="Удалить выбранный сервер" Click="DeleteServer_Click" HorizontalAlignment="Stretch" Margin="0,8,0,0" Background="#382738"/>
+        </StackPanel>
+        <ListBox x:Name="ServersList" SelectionChanged="ServersList_SelectionChanged" ScrollViewer.VerticalScrollBarVisibility="Auto" ScrollViewer.HorizontalScrollBarVisibility="Disabled" HorizontalContentAlignment="Stretch">
+          <ListBox.ItemTemplate><DataTemplate>
+            <Grid ToolTip="{Binding Details}"><Grid.ColumnDefinitions><ColumnDefinition Width="38"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+              <Border Width="30" Height="30" CornerRadius="8" Background="#4D4FA8" HorizontalAlignment="Left" VerticalAlignment="Center"><TextBlock Text="◈" HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="15"/></Border>
+              <StackPanel Grid.Column="1" VerticalAlignment="Center" MinWidth="0">
+                <TextBlock Text="{Binding Name}" FontSize="14" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+                <TextBlock Text="{Binding Details}" Foreground="{StaticResource Muted}" FontSize="11" TextTrimming="CharacterEllipsis" Margin="0,3,0,0"/>
+              </StackPanel>
+            </Grid>
+          </DataTemplate></ListBox.ItemTemplate>
+        </ListBox>
+      </DockPanel>
+    </Border>
+    <Grid Grid.Column="1" Margin="20,0,0,0">
+      <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+      <Border Background="{StaticResource Card}" CornerRadius="16" Padding="22" Margin="0,0,0,16">
+        <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+          <StackPanel><TextBlock x:Name="ConnectionLabel" Text="НЕ ПОДКЛЮЧЕНО" Foreground="{StaticResource Muted}" FontSize="11" FontWeight="Bold"/>
+            <TextBlock x:Name="StatusText" Text="Не подключено" FontSize="25" FontWeight="SemiBold" Margin="0,5,0,7"/>
+            <TextBlock x:Name="ServerText" Text="Выберите сервер слева" Foreground="{StaticResource Muted}" TextTrimming="CharacterEllipsis"/>
+          </StackPanel>
+          <Button Grid.Column="1" x:Name="ConnectButton" Content="Подключить" Background="{StaticResource Accent}" FontWeight="Bold" Padding="24,13" Click="Connect_Click" VerticalAlignment="Center"/>
+        </Grid>
+      </Border>
+      <Border Grid.Row="1" Background="{StaticResource Card}" CornerRadius="16" Padding="22" Margin="0,0,0,16">
+        <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+          <StackPanel><TextBlock Text="Текущий профиль" FontSize="17" FontWeight="SemiBold"/>
+            <TextBlock x:Name="ProfileSummaryName" FontSize="20" Margin="0,12,0,2"/>
+            <TextBlock x:Name="ProfileSummaryMode" Foreground="{StaticResource Muted}"/>
+          </StackPanel>
+          <Button Grid.Column="1" Content="Настроить профиль" Click="EditProfile_Click" VerticalAlignment="Center"/>
+        </Grid>
+      </Border>
+      <Border Grid.Row="2" Background="{StaticResource Card}" CornerRadius="16" Padding="22">
+        <Grid><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+          <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+            <StackPanel><TextBlock x:Name="AppsHeading" Text="Приложения через VPN" FontSize="17" FontWeight="SemiBold"/><TextBlock Text="Список этого профиля" Foreground="{StaticResource Muted}" FontSize="11" Margin="0,5,0,0"/></StackPanel>
+            <Button Grid.Column="1" Content="Настроить приложения" Click="EditProfile_Click"/>
+          </Grid>
+          <ListBox Grid.Row="1" x:Name="AppsList" Margin="0,12,0,0">
+            <ListBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding}" TextTrimming="CharacterEllipsis" ToolTip="{Binding}"/></DataTemplate></ListBox.ItemTemplate>
+          </ListBox>
+          <TextBlock Grid.Row="2" Text="Приложения и исключения меняются на странице профиля." Foreground="{StaticResource Muted}" FontSize="11" Margin="0,10,0,0"/>
+        </Grid>
+      </Border>
+    </Grid>
+    <TextBlock Grid.Row="1" Grid.ColumnSpan="2" x:Name="FooterText" Text="Изменения профиля применяются после переподключения." Foreground="{StaticResource Muted}" Margin="2,14,0,0" TextWrapping="Wrap"/>
+  </Grid>
+</Window>

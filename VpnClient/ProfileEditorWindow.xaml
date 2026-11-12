@@ -1,0 +1,30 @@
+<Window x:Class="VpnClient.ProfileEditorWindow" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Title="Профиль · Pipidastr VPN" Width="760" Height="690" MinWidth="620" MinHeight="560" WindowStartupLocation="CenterOwner" Background="{StaticResource Page}" Foreground="White">
+  <Grid Margin="25"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+    <StackPanel><TextBlock x:Name="Heading" Text="Новый профиль" FontSize="25" FontWeight="SemiBold"/><TextBlock Text="Настройте подключение и приложения" Foreground="{StaticResource Muted}" Margin="0,6,0,18"/></StackPanel>
+    <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto"><StackPanel>
+      <Border Background="{StaticResource Card}" CornerRadius="14" Padding="20" Margin="0,0,0,14"><StackPanel>
+        <TextBlock Text="Название профиля" Foreground="{StaticResource Muted}" Margin="0,0,0,6"/><TextBox x:Name="NameBox"/>
+        <TextBlock Text="Режим маршрутизации" Foreground="{StaticResource Muted}" Margin="0,16,0,6"/>
+        <ComboBox x:Name="ModeBox" SelectionChanged="Mode_Changed"><ComboBoxItem Content="Только выбранные приложения"/><ComboBoxItem Content="Весь трафик"/></ComboBox>
+      </StackPanel></Border>
+      <Border Background="{StaticResource Card}" CornerRadius="14" Padding="20" Margin="0,0,0,14"><StackPanel>
+        <TextBlock Text="Подписка" FontSize="16" FontWeight="SemiBold"/><TextBlock Text="Ссылка HTTPS; серверы появятся слева после обновления" Foreground="{StaticResource Muted}" Margin="0,5,0,12"/>
+        <TextBox x:Name="SubscriptionBox" ToolTip="Ссылка на подписку"/>
+        <Button x:Name="RefreshButton" Content="Обновить серверы" HorizontalAlignment="Right" Margin="0,10,0,0" Click="Refresh_Click"/>
+        <TextBlock x:Name="ServerCount" Foreground="{StaticResource Muted}" Margin="0,8,0,0"/>
+      </StackPanel></Border>
+      <Border Background="{StaticResource Card}" CornerRadius="14" Padding="20"><StackPanel>
+        <TextBlock x:Name="AppsHeading" Text="Приложения через VPN" FontSize="16" FontWeight="SemiBold"/>
+        <TextBlock Text="Выберите запущенную программу или файл .exe" Foreground="{StaticResource Muted}" Margin="0,5,0,10"/>
+        <ListBox x:Name="AppsList" Height="105"/>
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,8,0,0"><Button Content="Убрать" Click="RemoveApp_Click"/><Button Content="＋ Добавить приложение" Click="AddApp_Click" Margin="8,0,0,0"/></StackPanel>
+        <Button Content="Программы вне VPN (Zapret)" HorizontalAlignment="Right" Margin="0,10,0,0" Click="Exceptions_Click"/>
+      </StackPanel></Border>
+    </StackPanel></ScrollViewer>
+    <Grid Grid.Row="2" Margin="0,15,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+      <Button x:Name="DeleteButton" Content="Удалить профиль" Background="#382738" Click="Delete_Click"/>
+      <Button Grid.Column="2" Content="Назад" Margin="0,0,9,0" Click="Cancel_Click"/>
+      <Button Grid.Column="3" Content="Сохранить профиль" Background="{StaticResource Accent}" Click="Save_Click"/>
+    </Grid>
+  </Grid>
+</Window>

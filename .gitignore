@@ -1,0 +1,14 @@
+.dotnet/
+**/bin/
+**/obj/
+publish/
+*.zip
+profiles.json
+device-id.txt
+*.log
+VpnClient/third_party/xray-*/geoip.dat
+VpnClient/third_party/xray-*/geosite.dat
+VpnClient/third_party/xray-*/wintun.dll
+VpnClient/third_party/xray-*/LICENSE-Wintun
+VpnClient/third_party/xray-*/README.md
+VpnClient/third_party/xray-*/xray_no_window.*

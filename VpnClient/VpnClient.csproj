@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net9.0-windows</TargetFramework>
+    <AssemblyName>PipidastrVPN</AssemblyName>
+    <UseWPF>true</UseWPF>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+  </PropertyGroup>
+  <ItemGroup>
+    <Content Include="third_party\sing-box-1.14.4-windows-amd64\sing-box.exe" Link="sing-box.exe" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="third_party\sing-box-1.14.4-windows-amd64\libcronet.dll" Link="libcronet.dll" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="third_party\sing-box-1.14.4-windows-amd64\LICENSE" Link="sing-box-LICENSE" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="third_party\xray-v26.11.9\xray.exe" Link="xray.exe" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="third_party\xray-v26.11.9\LICENSE" Link="xray-LICENSE" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>
