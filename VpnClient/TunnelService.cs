@@ -3,6 +3,7 @@ using System.Net;
 using System.Net.Http;
 using System.Net.Sockets;
 using System.Security.Principal;
+using System.Text;
 using System.Text.RegularExpressions;
 
 namespace VpnClient;
@@ -16,6 +17,8 @@ public sealed class TunnelService : IDisposable
     private string? xrayConfig;
     private string? singConfig;
     private bool stopping;
+    private volatile bool starting;
+    private readonly string sessionLog = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "PipidastrVPN", "session.log");
 
     public bool IsRunning => xray is { HasExited: false } && singBox is { HasExited: false };
     public string? EgressIp { get; private set; }
@@ -36,6 +39,11 @@ public sealed class TunnelService : IDisposable
         var singBinary = Path.Combine(AppContext.BaseDirectory, "sing-box.exe");
         if (!File.Exists(xrayBinary) || !File.Exists(singBinary))
             throw new FileNotFoundException("В папке клиента нужны xray.exe и sing-box.exe. Переустановите Pipidastr VPN.");
+        lock (gate) recentLog.Clear();
+        Directory.CreateDirectory(Path.GetDirectoryName(sessionLog)!);
+        if (File.Exists(sessionLog) && new FileInfo(sessionLog).Length > 2_000_000)
+            File.Move(sessionLog, sessionLog + ".old", true);
+        File.AppendAllText(sessionLog, $"{DateTimeOffset.Now:O} Новый запуск VPN{Environment.NewLine}", Encoding.UTF8);
 
         var hysteria = server.Link.StartsWith("hysteria2://", StringComparison.OrdinalIgnoreCase);
         var socksPort = FreePort();
@@ -46,6 +54,7 @@ public sealed class TunnelService : IDisposable
             : XrayConfigBuilder.Build(Vless.Parse(server.Link), socksPort, httpPort);
         xrayConfig = Path.Combine(Path.GetTempPath(), "pipidastr-xray-" + Guid.NewGuid().ToString("N") + ".json");
         singConfig = Path.Combine(Path.GetTempPath(), "pipidastr-tun-" + Guid.NewGuid().ToString("N") + ".json");
+        starting = true;
         try
         {
             await ConfigFile.WriteAsync(xrayConfig, transportConfig);
@@ -55,12 +64,28 @@ public sealed class TunnelService : IDisposable
 
             xray = StartEngine(xrayBinary, "Xray", "run", "-config", xrayConfig);
             await WaitForPortAsync(httpPort);
-            EgressIp = await ProbeProxyAsync(httpPort);
+            EgressIp = await ProbeProxyWithRetryAsync(httpPort);
             Log?.Invoke("VPN-сервер ответил. Включаю системный туннель…");
 
-            singBox = StartEngine(singBinary, "TUN", "run", "-c", singConfig);
-            await Task.Delay(1200);
-            if (!IsRunning) throw new IOException("Не удалось запустить туннель. " + LastError());
+            for (var attempt = 1; attempt <= 3; attempt++)
+            {
+                singBox = StartEngine(singBinary, "TUN", "run", "-c", singConfig);
+                await Task.Delay(1200);
+                if (IsRunning) break;
+                var error = LastError();
+                Kill(singBox);
+                singBox = null;
+                if (attempt == 3 || xray is not { HasExited: false })
+                {
+                    var hint = error.Contains("set ipv4 address: Element not found", StringComparison.OrdinalIgnoreCase)
+                        ? " Windows не смогла назначить IPv4-адрес TUN-адаптеру. Проверьте, что компонент TCP/IPv4 включён для сетевых адаптеров, затем перезагрузите Windows."
+                        : "";
+                    throw new IOException("Не удалось запустить туннель. " + error + hint);
+                }
+                Log?.Invoke($"TUN не запустился, повторная попытка {attempt}/2…");
+                await Task.Delay(TimeSpan.FromSeconds(attempt));
+            }
+            starting = false;
             return EgressIp;
         }
         catch
@@ -68,6 +93,7 @@ public sealed class TunnelService : IDisposable
             Stop();
             throw;
         }
+        finally { starting = false; }
     }
 
     private Process StartEngine(string binary, string label, params string[] args)
@@ -82,7 +108,12 @@ public sealed class TunnelService : IDisposable
         process.OutputDataReceived += (_, e) => { if (e.Data != null) Record(label, e.Data); };
         process.ErrorDataReceived += (_, e) => { if (e.Data != null) Record(label, e.Data); };
         process.EnableRaisingEvents = true;
-        process.Exited += (_, _) => { if (!stopping) _ = Task.Run(Stop); };
+        process.Exited += (_, _) =>
+        {
+            if (stopping) return;
+            try { Record(label, $"Процесс завершился с кодом {process.ExitCode}."); } catch (InvalidOperationException) { }
+            if (!starting) _ = Task.Run(Stop);
+        };
         process.BeginOutputReadLine(); process.BeginErrorReadLine();
         return process;
     }
@@ -143,6 +174,20 @@ public sealed class TunnelService : IDisposable
         throw new IOException("VPN-сервер не передаёт трафик. " + LastError());
     }
 
+    private async Task<string> ProbeProxyWithRetryAsync(int port)
+    {
+        for (var attempt = 1; attempt <= 3; attempt++)
+        {
+            try { return await ProbeProxyAsync(port); }
+            catch (IOException) when (attempt < 3 && xray is { HasExited: false })
+            {
+                Log?.Invoke($"Сервер пока не ответил, повторная проверка {attempt}/2…");
+                await Task.Delay(TimeSpan.FromSeconds(attempt));
+            }
+        }
+        throw new IOException("VPN-сервер не ответил на проверку.");
+    }
+
     private void Record(string label, string line)
     {
         var clean = Regex.Replace(line, "\u001b\\[[0-9;]*m", "");
@@ -150,6 +195,8 @@ public sealed class TunnelService : IDisposable
         {
             recentLog.Enqueue($"{label}: {clean}");
             while (recentLog.Count > 100) recentLog.Dequeue();
+            try { File.AppendAllText(sessionLog, $"{DateTimeOffset.Now:O} {label}: {clean}{Environment.NewLine}"); }
+            catch (IOException) { }
         }
         Log?.Invoke($"{label}: {clean}");
     }
@@ -157,7 +204,9 @@ public sealed class TunnelService : IDisposable
     private string LastError()
     {
         lock (gate)
-            return recentLog.LastOrDefault(x => x.Contains("error", StringComparison.OrdinalIgnoreCase) || x.Contains("failed", StringComparison.OrdinalIgnoreCase))
+            return recentLog.LastOrDefault(x => x.Contains("error", StringComparison.OrdinalIgnoreCase) ||
+                x.Contains("failed", StringComparison.OrdinalIgnoreCase) ||
+                x.Contains("fatal", StringComparison.OrdinalIgnoreCase))
                 ?? "Сервер не ответил на проверочный запрос.";
     }
 

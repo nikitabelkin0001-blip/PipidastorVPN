@@ -1,4 +1,6 @@
 .dotnet/
+.dotnet-cli/
+portable-build/
 **/bin/
 **/obj/
 publish/

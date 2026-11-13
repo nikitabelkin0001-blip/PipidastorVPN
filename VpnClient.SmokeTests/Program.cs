@@ -61,12 +61,24 @@ var profile = new ConnectionProfile { Name = "Test", Applications = [@"C:\Progra
 var selected = ConfigBuilder.Build(profile, 10880);
 using (var json = JsonDocument.Parse(selected))
 {
-    if (json.RootElement.GetProperty("inbounds")[0].GetProperty("stack").GetString() != "mixed")
+    if (json.RootElement.GetProperty("inbounds")[0].GetProperty("stack").GetString() != "gvisor")
         throw new Exception("TUN UDP stack is not gVisor");
+    if (json.RootElement.GetProperty("inbounds")[0].GetProperty("address").GetArrayLength() != 1 ||
+        json.RootElement.GetProperty("dns").GetProperty("strategy").GetString() != "ipv4_only")
+        throw new Exception("IPv6 route is enabled without a working IPv6 uplink");
+    if (json.RootElement.GetProperty("inbounds")[0].GetProperty("udp_timeout").GetString() != "15m")
+        throw new Exception("TUN UDP lifetime is too short");
+    var dns = json.RootElement.GetProperty("dns").GetProperty("servers")[0];
+    if (dns.GetProperty("type").GetString() != "https" || dns.GetProperty("detour").GetString() != "proxy" ||
+        dns.GetProperty("tls").GetProperty("server_name").GetString() != "cloudflare-dns.com")
+        throw new Exception("DNS bypasses VPN");
     var route = json.RootElement.GetProperty("route");
     if (route.GetProperty("final").GetString() != "direct") throw new Exception("Selected-app final route failed");
     var rules = route.GetProperty("rules");
     if (!rules.EnumerateArray().Any(r => r.TryGetProperty("process_path", out _))) throw new Exception("App rule missing");
+    if (!rules.EnumerateArray().Any(r => r.TryGetProperty("process_name", out var names) &&
+        names.EnumerateArray().Any(n => n.GetString() == "app.exe")))
+        throw new Exception("App filename fallback rule missing");
 }
 var legacyFile = Path.Combine(Path.GetTempPath(), "pipidastr-profile-test-" + Guid.NewGuid().ToString("N") + ".json");
 try
