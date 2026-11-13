@@ -49,16 +49,26 @@ public sealed class TunnelService : IDisposable
         var socksPort = FreePort();
         var httpPort = FreePort();
         while (httpPort == socksPort) httpPort = FreePort();
-        var transportConfig = hysteria
-            ? XrayConfigBuilder.Build(Hysteria.Parse(server.Link), socksPort, httpPort)
-            : XrayConfigBuilder.Build(Vless.Parse(server.Link), socksPort, httpPort);
+        var hysteriaNode = hysteria ? Hysteria.Parse(server.Link) : null;
+        var vlessNode = hysteria ? null : Vless.Parse(server.Link);
+        var serverHost = hysteriaNode?.Host ?? vlessNode!.Host;
+        var transportConfig = hysteriaNode != null
+            ? XrayConfigBuilder.Build(hysteriaNode, socksPort, httpPort)
+            : XrayConfigBuilder.Build(vlessNode!, socksPort, httpPort);
+        var serverAddresses = IPAddress.TryParse(serverHost, out var ip)
+            ? new[] { ip }
+            : await Dns.GetHostAddressesAsync(serverHost);
+        var serverIpv4Addresses = serverAddresses.Where(address => address.AddressFamily == AddressFamily.InterNetwork)
+            .Select(address => address.ToString()).ToArray();
+        if (serverIpv4Addresses.Length == 0)
+            throw new IOException("У VPN-сервера нет доступного IPv4-адреса.");
         xrayConfig = Path.Combine(Path.GetTempPath(), "pipidastr-xray-" + Guid.NewGuid().ToString("N") + ".json");
         singConfig = Path.Combine(Path.GetTempPath(), "pipidastr-tun-" + Guid.NewGuid().ToString("N") + ".json");
         starting = true;
         try
         {
             await ConfigFile.WriteAsync(xrayConfig, transportConfig);
-            await ConfigFile.WriteAsync(singConfig, ConfigBuilder.Build(profile, socksPort));
+            await ConfigFile.WriteAsync(singConfig, ConfigBuilder.Build(profile, socksPort, serverIpv4Addresses));
             await CheckAsync(xrayBinary, "run", "-test", "-config", xrayConfig);
             await CheckAsync(singBinary, "check", "-c", singConfig);
 

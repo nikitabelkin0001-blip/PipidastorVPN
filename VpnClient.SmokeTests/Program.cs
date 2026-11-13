@@ -57,17 +57,23 @@ try
     if (repeated.Servers.Count != 1 || seenIds[2] != seenIds[1]) throw new Exception("Device ID was not stable");
 }
 finally { if (File.Exists(idFile)) File.Delete(idFile); }
-var profile = new ConnectionProfile { Name = "Test", Applications = [@"C:\Program Files\App\app.exe"] };
-var selected = ConfigBuilder.Build(profile, 10880);
+var profile = new ConnectionProfile { Name = "Test", Applications = [@"C:\Program Files\App\app.exe"], DirectApplications = ["winws.exe", "Discord.exe"] };
+var selected = ConfigBuilder.Build(profile, 10880, ["216.227.189.30"]);
 using (var json = JsonDocument.Parse(selected))
 {
-    if (json.RootElement.GetProperty("inbounds")[0].GetProperty("stack").GetString() != "gvisor")
-        throw new Exception("TUN UDP stack is not gVisor");
+    if (json.RootElement.GetProperty("inbounds")[0].GetProperty("stack").GetString() != "mixed")
+        throw new Exception("TUN stack is not mixed");
     if (json.RootElement.GetProperty("inbounds")[0].GetProperty("address").GetArrayLength() != 1 ||
         json.RootElement.GetProperty("dns").GetProperty("strategy").GetString() != "ipv4_only")
         throw new Exception("IPv6 route is enabled without a working IPv6 uplink");
     if (json.RootElement.GetProperty("inbounds")[0].GetProperty("udp_timeout").GetString() != "15m")
         throw new Exception("TUN UDP lifetime is too short");
+    if (!json.RootElement.GetProperty("inbounds")[0].GetProperty("route_exclude_address").EnumerateArray()
+        .Any(address => address.GetString() == "162.159.128.0/17"))
+        throw new Exception("Discord traffic still enters TUN");
+    if (!json.RootElement.GetProperty("inbounds")[0].GetProperty("route_exclude_address").EnumerateArray()
+        .Any(address => address.GetString() == "216.227.189.30/32"))
+        throw new Exception("VPN server traffic still enters TUN");
     var dns = json.RootElement.GetProperty("dns").GetProperty("servers")[0];
     if (dns.GetProperty("type").GetString() != "https" || dns.GetProperty("detour").GetString() != "proxy" ||
         dns.GetProperty("tls").GetProperty("server_name").GetString() != "cloudflare-dns.com")
@@ -83,15 +89,15 @@ using (var json = JsonDocument.Parse(selected))
 var legacyFile = Path.Combine(Path.GetTempPath(), "pipidastr-profile-test-" + Guid.NewGuid().ToString("N") + ".json");
 try
 {
-    await File.WriteAllTextAsync(legacyFile, "[{\"Name\":\"Legacy\",\"Mode\":0,\"Applications\":[],\"DirectApplications\":[\"Discord.exe\",\"winws.exe\"]}]");
+    await File.WriteAllTextAsync(legacyFile, "[{\"Name\":\"Legacy\",\"Mode\":0,\"Applications\":[\"browser.exe\",\"Discord.exe\"],\"DirectApplications\":[\"winws.exe\"]}]");
     var migrated = new ProfileStore(legacyFile).Load().Single();
-    if (migrated.DirectApplications.Contains("Discord.exe") || !migrated.Applications.Contains("Discord.exe") || !migrated.DirectApplications.Contains("winws.exe"))
+    if (!migrated.DirectApplications.Contains("Discord.exe") || migrated.Applications.Contains("Discord.exe") || !migrated.DirectApplications.Contains("winws.exe"))
         throw new Exception("Discord routing migration failed");
     using var config = JsonDocument.Parse(ConfigBuilder.Build(migrated, 10880));
     var discordRule = config.RootElement.GetProperty("route").GetProperty("rules").EnumerateArray()
         .FirstOrDefault(r => r.TryGetProperty("process_name", out var names) && names.EnumerateArray().Any(n => n.GetString() == "Discord.exe"));
-    if (discordRule.ValueKind == JsonValueKind.Undefined || discordRule.GetProperty("outbound").GetString() != "proxy")
-        throw new Exception("Discord is not routed through VPN");
+    if (discordRule.ValueKind == JsonValueKind.Undefined || discordRule.GetProperty("outbound").GetString() != "direct")
+        throw new Exception("Discord is not routed directly");
 }
 finally { File.Delete(legacyFile); }
 profile.Mode = TrafficMode.FullTunnel;

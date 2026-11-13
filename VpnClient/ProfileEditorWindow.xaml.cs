@@ -16,7 +16,7 @@ public partial class ProfileEditorWindow : Window
         InitializeComponent();
         SourceInitialized += (_, _) => WindowAppearance.Apply(this);
         this.subscriptions = subscriptions;
-        draft = source == null ? new ConnectionProfile { RoutingVersion = 1 } : new ConnectionProfile
+        draft = source == null ? new ConnectionProfile { RoutingVersion = 2 } : new ConnectionProfile
         {
             Id = source.Id, Name = source.Name, Mode = source.Mode,
             Applications = [.. source.Applications], DirectApplications = [.. source.DirectApplications],

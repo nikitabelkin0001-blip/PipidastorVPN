@@ -19,8 +19,8 @@ public sealed class ConnectionProfile
     public Guid Id { get; set; } = Guid.NewGuid();
     public string Name { get; set; } = "Новый профиль";
     public TrafficMode Mode { get; set; } = TrafficMode.SelectedApps;
-    public List<string> Applications { get; set; } = ["Discord.exe"];
-    public List<string> DirectApplications { get; set; } = ["winws.exe"];
+    public List<string> Applications { get; set; } = [];
+    public List<string> DirectApplications { get; set; } = ["winws.exe", "Discord.exe"];
     public int? RoutingVersion { get; set; }
     public List<ServerEntry> Servers { get; set; } = [];
     public string? SubscriptionUrl { get; set; }
@@ -53,13 +53,11 @@ public sealed class ProfileStore
             var profiles = JsonSerializer.Deserialize<List<ConnectionProfile>>(File.ReadAllText(file)) ?? [];
             foreach (var profile in profiles)
             {
-                if (profile.RoutingVersion != null) continue;
-                var hadDiscordExclusion = profile.DirectApplications.RemoveAll(name =>
-                    name.Equals("Discord.exe", StringComparison.OrdinalIgnoreCase)) > 0;
-                if (hadDiscordExclusion && profile.Mode == TrafficMode.SelectedApps &&
-                    !profile.Applications.Any(path => Path.GetFileName(path).Equals("Discord.exe", StringComparison.OrdinalIgnoreCase)))
-                    profile.Applications.Add("Discord.exe");
-                profile.RoutingVersion = 1;
+                if (profile.RoutingVersion >= 2) continue;
+                profile.Applications.RemoveAll(path => Path.GetFileName(path).Equals("Discord.exe", StringComparison.OrdinalIgnoreCase));
+                if (!profile.DirectApplications.Any(path => Path.GetFileName(path).Equals("Discord.exe", StringComparison.OrdinalIgnoreCase)))
+                    profile.DirectApplications.Add("Discord.exe");
+                profile.RoutingVersion = 2;
             }
             return profiles;
         }
