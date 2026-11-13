@@ -14,6 +14,7 @@ public partial class AppPickerWindow : Window
     public AppPickerWindow()
     {
         InitializeComponent();
+        SourceInitialized += (_, _) => WindowAppearance.Apply(this);
         candidates = RunningApplications();
         CandidatesList.ItemsSource = candidates;
         SearchBox.Focus();

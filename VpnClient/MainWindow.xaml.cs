@@ -18,6 +18,7 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        SourceInitialized += (_, _) => WindowAppearance.Apply(this);
         subscriptions = new SubscriptionClient(http, new DeviceIdentity());
         try { profiles = store.Load(); }
         catch (Exception ex) { MessageBox.Show(ex.Message, "Профили", MessageBoxButton.OK, MessageBoxImage.Warning); profiles = [new() { Name = "Приложения" }]; }

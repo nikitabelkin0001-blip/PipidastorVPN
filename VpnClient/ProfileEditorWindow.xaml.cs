@@ -14,6 +14,7 @@ public partial class ProfileEditorWindow : Window
     public ProfileEditorWindow(ConnectionProfile? source, SubscriptionClient subscriptions, bool allowDelete)
     {
         InitializeComponent();
+        SourceInitialized += (_, _) => WindowAppearance.Apply(this);
         this.subscriptions = subscriptions;
         draft = source == null ? new ConnectionProfile { RoutingVersion = 1 } : new ConnectionProfile
         {
