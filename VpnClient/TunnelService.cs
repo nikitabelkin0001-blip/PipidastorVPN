@@ -80,7 +80,9 @@ public sealed class TunnelService : IDisposable
             for (var attempt = 1; attempt <= 3; attempt++)
             {
                 singBox = StartEngine(singBinary, "TUN", "run", "-c", singConfig);
-                await Task.Delay(1200);
+                // Windows may fail to assign the TUN address a few seconds after
+                // sing-box starts. Keep startup in the retry window until then.
+                await Task.Delay(4000);
                 if (IsRunning) break;
                 var error = LastError();
                 Kill(singBox);
