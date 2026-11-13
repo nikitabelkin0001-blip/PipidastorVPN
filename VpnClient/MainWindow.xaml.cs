@@ -1,6 +1,7 @@
 using System.Net.Http;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Data;
 
 namespace VpnClient;
 
@@ -43,14 +44,17 @@ public partial class MainWindow : Window
         if (profile != null)
         {
             AppsList.ItemsSource = null;
-            AppsList.ItemsSource = profile.Mode == TrafficMode.FullTunnel ? profile.DirectApplications : profile.Applications;
+            AppsList.ItemsSource = (profile.Mode == TrafficMode.FullTunnel ? profile.DirectApplications : profile.Applications)
+                .Select(AppListItem.FromPath).ToList();
             ServersList.ItemsSource = null; ServersList.ItemsSource = profile.Servers;
-            ServersList.SelectedIndex = profile.Servers.Count == 0 ? -1 : Math.Clamp(profile.SelectedServer, 0, profile.Servers.Count - 1);
+            ApplyServerFilter();
+            var selectedServer = profile.Servers.Count == 0 ? null : profile.Servers[Math.Clamp(profile.SelectedServer, 0, profile.Servers.Count - 1)];
+            ServersList.SelectedItem = selectedServer;
             ServerCountText.Text = profile.Servers.Count.ToString();
             ProfileSummaryName.Text = profile.Name;
             ProfileSummaryMode.Text = profile.Mode == TrafficMode.FullTunnel ? "Весь трафик через VPN" : "VPN для выбранных приложений";
             AppsHeading.Text = profile.Mode == TrafficMode.FullTunnel ? "Исключения из VPN" : "Приложения через VPN";
-            ServerText.Text = ServersList.SelectedItem is ServerEntry server ? server.Name : "Добавьте сервер VLESS/Reality";
+            ServerText.Text = selectedServer?.Name ?? "Добавьте подписку";
         }
         loading = false;
     }
@@ -62,6 +66,25 @@ public partial class MainWindow : Window
     }
 
     private void ProfilesBox_SelectionChanged(object sender, SelectionChangedEventArgs e) { if (!loading) LoadProfile(); }
+
+    private void ServerSearchBox_TextChanged(object sender, TextChangedEventArgs e)
+    {
+        if (ServersList == null) return;
+        var wasLoading = loading;
+        loading = true;
+        ApplyServerFilter();
+        loading = wasLoading;
+    }
+
+    private void ApplyServerFilter()
+    {
+        if (ServersList.ItemsSource == null) return;
+        var query = ServerSearchBox.Text.Trim();
+        CollectionViewSource.GetDefaultView(ServersList.ItemsSource).Filter = item =>
+            item is ServerEntry server && (query.Length == 0 ||
+                server.Name.Contains(query, StringComparison.CurrentCultureIgnoreCase) ||
+                server.Details.Contains(query, StringComparison.CurrentCultureIgnoreCase));
+    }
 
     private void AddProfile_Click(object sender, RoutedEventArgs e)
     {
@@ -88,44 +111,66 @@ public partial class MainWindow : Window
 
     private void ServersList_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (loading || Current == null) return;
-        Current.SelectedServer = ServersList.SelectedIndex;
-        ServerText.Text = ServersList.SelectedItem is ServerEntry server ? server.Name : "Выберите сервер слева";
+        if (loading || Current == null || ServersList.SelectedItem is not ServerEntry server) return;
+        Current.SelectedServer = Current.Servers.IndexOf(server);
+        ServerText.Text = server.Name;
         Save();
     }
 
-    private void AddServer_Click(object sender, RoutedEventArgs e)
+    private async void AddSubscription_Click(object sender, RoutedEventArgs e)
     {
         var profile = Current;
         if (profile == null) return;
-        var input = Prompt("Добавить сервер", "Вставьте ссылку vless://", "");
+        if (tunnel.IsRunning) { ShowError("Отключите VPN перед обновлением подписки."); return; }
+        var input = Prompt("Добавить подписку", "Вставьте HTTPS-ссылку на подписку", profile.SubscriptionUrl ?? "");
         if (string.IsNullOrWhiteSpace(input)) return;
+        if (!Uri.TryCreate(input.Trim(), UriKind.Absolute, out var uri) || uri.Scheme != Uri.UriSchemeHttps)
+        { ShowError("Нужна HTTPS-ссылка на подписку."); return; }
+        AddSubscriptionButton.IsEnabled = false;
         try
         {
-            var node = Vless.Parse(input);
-            profile.Servers.Add(new ServerEntry { Name = node.Name, Link = input.Trim() });
-            profile.SelectedServer = profile.Servers.Count - 1;
+            var result = await subscriptions.FetchAsync(uri, profile.SubscriptionHwid, profile.SubscriptionNeedsDeviceId);
+            profile.SubscriptionUrl = uri.ToString();
+            profile.SubscriptionNeedsDeviceId = result.UsedDeviceId;
+            profile.Servers = result.Servers;
+            profile.SelectedServer = 0;
             Save(); LoadProfile();
+            MessageBox.Show($"Добавлено серверов: {result.Servers.Count}." +
+                (result.SkippedCount > 0 ? $"\nПропущено: {result.SkippedCount}.\n{result.SkipSummary}" : ""),
+                "Подписка обновлена", MessageBoxButton.OK, MessageBoxImage.Information);
         }
-        catch (Exception ex) when (ex is FormatException or NotSupportedException) { ShowError(ex.Message); }
+        catch (Exception ex) when (ex is HttpRequestException or FormatException or TaskCanceledException or InvalidDataException)
+        { ShowError(ex.Message); }
+        finally { AddSubscriptionButton.IsEnabled = true; }
     }
 
-    private void DeleteServer_Click(object sender, RoutedEventArgs e)
+    private void DeleteSubscription_Click(object sender, RoutedEventArgs e)
     {
-        if (Current == null || ServersList.SelectedItem is not ServerEntry server || tunnel.IsRunning) return;
-        Current.Servers.Remove(server); Current.SelectedServer = 0; Save(); LoadProfile();
+        var profile = Current;
+        if (profile == null || (profile.SubscriptionUrl == null && profile.Servers.Count == 0)) return;
+        if (tunnel.IsRunning) { ShowError("Отключите VPN перед удалением подписки."); return; }
+        if (MessageBox.Show($"Удалить подписку и все {profile.Servers.Count} серверов из профиля «{profile.Name}»?",
+            "Удалить подписку", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
+        profile.SubscriptionUrl = null;
+        profile.SubscriptionHwid = null;
+        profile.SubscriptionNeedsDeviceId = false;
+        profile.Servers.Clear();
+        profile.SelectedServer = 0;
+        Save(); LoadProfile();
     }
 
     private async void Connect_Click(object sender, RoutedEventArgs e)
     {
         if (tunnel.IsRunning) { tunnel.Stop(); return; }
-        if (Current == null || ServersList.SelectedItem is not ServerEntry server) { ShowError("Добавьте и выберите сервер."); return; }
+        var profile = Current;
+        if (profile == null || profile.Servers.Count == 0) { ShowError("Добавьте и выберите сервер."); return; }
+        var server = profile.Servers[Math.Clamp(profile.SelectedServer, 0, profile.Servers.Count - 1)];
         ConnectButton.IsEnabled = false;
         ConnectionLabel.Text = "ПОДКЛЮЧЕНИЕ";
         StatusText.Text = "Проверяю сервер…";
         try
         {
-            var ip = await tunnel.StartAsync(Current, server);
+            var ip = await tunnel.StartAsync(profile, server);
             SetConnectionState(true);
             FooterText.Text = "VPN-сервер ответил. Выходной IP: " + ip;
         }
@@ -141,6 +186,7 @@ public partial class MainWindow : Window
         ConnectButton.Background = (System.Windows.Media.Brush)FindResource(connected ? "BorderColor" : "Accent");
         ProfilesBox.IsHitTestVisible = !connected;
         ServersList.IsHitTestVisible = !connected;
+        ServerSearchBox.IsEnabled = !connected;
     }
     private static void ShowError(string text) => MessageBox.Show(text, "Pipidastr VPN", MessageBoxButton.OK, MessageBoxImage.Warning);
 

@@ -31,7 +31,7 @@ public static class ConfigBuilder
         {
             log = new { level = "info", timestamp = true },
             dns = new { servers = new object[] { new { type = "udp", tag = "local-dns", server = "1.1.1.1" } }, final = "local-dns" },
-            inbounds = new object[] { new { type = "tun", tag = "tun-in", interface_name = "PipidastrVPN", address = new[] { "172.19.0.1/30", "fdfe:dcba:9876::1/126" }, auto_route = true, strict_route = false, stack = "system" } },
+            inbounds = new object[] { new { type = "tun", tag = "tun-in", interface_name = "PipidastrVPN", address = new[] { "172.19.0.1/30", "fdfe:dcba:9876::1/126" }, auto_route = true, strict_route = false, stack = "mixed" } },
             outbounds = new object[] { new { type = "socks", tag = "proxy", server = "127.0.0.1", server_port = socksPort, version = "5" }, new { type = "direct", tag = "direct" } },
             route = new { auto_detect_interface = true, rules, final = profile.Mode == TrafficMode.FullTunnel ? "proxy" : "direct" }
         };

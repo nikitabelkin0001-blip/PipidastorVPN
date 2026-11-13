@@ -7,8 +7,31 @@ using VpnClient;
 var link = "vless://bf000d23-0752-40b4-affe-68f7707a9661@example.com:443?security=reality&type=tcp&sni=www.example.com&pbk=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA&sid=01234567&fp=chrome&flow=xtls-rprx-vision#Sample";
 var node = Vless.Parse(link);
 if (node.Name != "Sample" || node.ShortId != "01234567") throw new Exception("VLESS parser failed");
+var tlsLink = "vless://bf000d23-0752-40b4-affe-68f7707a9661@example.com:443?security=tls&type=tcp&sni=www.example.com&alpn=h2%2Chttp%2F1.1&pcs=" + new string('a', 64) + "#TLS";
+var tlsNode = Vless.Parse(tlsLink);
+if (tlsNode.Security != "tls" || tlsNode.Alpn.Length != 2 || tlsNode.PinnedCertSha256 != new string('a', 64))
+    throw new Exception("VLESS TLS parser failed");
+using (var tlsConfig = JsonDocument.Parse(XrayConfigBuilder.Build(tlsNode, 10880, 10881)))
+    if (tlsConfig.RootElement.GetProperty("outbounds")[0].GetProperty("streamSettings").GetProperty("tlsSettings")
+        .GetProperty("pinnedPeerCertSha256").GetString() != tlsNode.PinnedCertSha256)
+        throw new Exception("Xray TLS certificate pin missing");
+var grpcLink = link.Replace("type=tcp", "type=grpc&serviceName=demo");
+var grpcNode = Vless.Parse(grpcLink);
+if (grpcNode.Transport != "grpc" || grpcNode.ServiceName != "demo") throw new Exception("VLESS gRPC parser failed");
+var encryptedLink = "vless://bf000d23-0752-40b4-affe-68f7707a9661@example.com:443?security=none&type=tcp&encryption=mlkem768x25519plus.example&fm=%7B%22tcp%22%3A%5B%5D%7D#Encrypted";
+var encryptedNode = Vless.Parse(encryptedLink);
+if (encryptedNode.Security != "none" || encryptedNode.Encryption == "none" || encryptedNode.FinalMask == null)
+    throw new Exception("Encrypted VLESS parser failed");
+var hysteriaLink = "hysteria2://password@example.com:443?obfs=salamander&obfs-password=mask&sni=example.com&pinSHA256=" + new string('a', 64) + "#Hysteria";
+var hysteriaNode = Hysteria.Parse(hysteriaLink);
+if (hysteriaNode.Password != "password" || hysteriaNode.FinalMask == null) throw new Exception("Hysteria2 parser failed");
 var encoded = Convert.ToBase64String(Encoding.UTF8.GetBytes(link + "\n" + link.Replace("#Sample", "#Second")));
 if (Vless.ParseSubscription(encoded).Count != 2) throw new Exception("Subscription parser failed");
+if (Vless.ParseSubscription(Convert.ToBase64String(Encoding.UTF8.GetBytes(link + "\n" + tlsLink + "\n" + grpcLink + "\n" + encryptedLink + "\n" + hysteriaLink))).Count != 5)
+    throw new Exception("Mixed VLESS subscription parser failed");
+var partial = Vless.ParseSubscriptionDetailed(link + "\n" + tlsLink + "\n" + "trojan://redacted@example.com:443#Other");
+if (partial.Servers.Count != 2 || partial.SkippedCount != 1 || !partial.SkipSummary.Contains("Другой протокол"))
+    throw new Exception("Subscription import summary failed");
 var decoy = "vless://bf000d23-0752-40b4-affe-68f7707a9661@0.0.0.0:1?security=none&type=tcp#" + Uri.EscapeDataString("Включите отправку HWID в настройках приложения");
 try { Vless.ParseSubscription(Convert.ToBase64String(Encoding.UTF8.GetBytes(decoy))); throw new Exception("HWID decoy was accepted"); }
 catch (DeviceIdRequiredException) { }
@@ -38,6 +61,8 @@ var profile = new ConnectionProfile { Name = "Test", Applications = [@"C:\Progra
 var selected = ConfigBuilder.Build(profile, 10880);
 using (var json = JsonDocument.Parse(selected))
 {
+    if (json.RootElement.GetProperty("inbounds")[0].GetProperty("stack").GetString() != "mixed")
+        throw new Exception("TUN UDP stack is not gVisor");
     var route = json.RootElement.GetProperty("route");
     if (route.GetProperty("final").GetString() != "direct") throw new Exception("Selected-app final route failed");
     var rules = route.GetProperty("rules");
@@ -78,22 +103,30 @@ foreach (var (name, config) in new[] { ("selected", selected), ("full", full) })
     }
     finally { File.Delete(temp); }
 }
-var xrayConfig = XrayConfigBuilder.Build(node, 10880, 10881);
 var xrayBinary = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "VpnClient", "third_party", "xray-v26.11.9", "xray.exe"));
-var xrayTemp = Path.Combine(Path.GetTempPath(), "pipidastr-xray-test-" + Guid.NewGuid().ToString("N") + ".json");
-try
+foreach (var (name, xrayConfig) in new[]
 {
-    await ConfigFile.WriteAsync(xrayTemp, xrayConfig);
-    var psi = new ProcessStartInfo(xrayBinary) { RedirectStandardError = true, RedirectStandardOutput = true, UseShellExecute = false, CreateNoWindow = true };
-    foreach (var arg in new[] { "run", "-test", "-config", xrayTemp }) psi.ArgumentList.Add(arg);
-    using var process = Process.Start(psi)!;
-    var stdout = process.StandardOutput.ReadToEnd();
-    var stderr = process.StandardError.ReadToEnd();
-    process.WaitForExit();
-    if (process.ExitCode != 0) throw new Exception($"Xray rejected config: {stderr} {stdout}");
+    ("Reality/TCP", XrayConfigBuilder.Build(node, 10880, 10881)),
+    ("TLS/TCP", XrayConfigBuilder.Build(tlsNode, 10880, 10881)),
+    ("Reality/gRPC", XrayConfigBuilder.Build(grpcNode, 10880, 10881)),
+    ("Hysteria2", XrayConfigBuilder.Build(hysteriaNode, 10880, 10881))
+})
+{
+    var xrayTemp = Path.Combine(Path.GetTempPath(), "pipidastr-xray-test-" + Guid.NewGuid().ToString("N") + ".json");
+    try
+    {
+        await ConfigFile.WriteAsync(xrayTemp, xrayConfig);
+        var psi = new ProcessStartInfo(xrayBinary) { RedirectStandardError = true, RedirectStandardOutput = true, UseShellExecute = false, CreateNoWindow = true };
+        foreach (var arg in new[] { "run", "-test", "-config", xrayTemp }) psi.ArgumentList.Add(arg);
+        using var process = Process.Start(psi)!;
+        var stdout = process.StandardOutput.ReadToEnd();
+        var stderr = process.StandardError.ReadToEnd();
+        process.WaitForExit();
+        if (process.ExitCode != 0) throw new Exception($"Xray rejected {name}: {stderr} {stdout}");
+    }
+    finally { File.Delete(xrayTemp); }
 }
-finally { File.Delete(xrayTemp); }
-Console.WriteLine("VLESS, subscription, automatic device ID, Discord migration, both routing modes, sing-box and Xray config checks: OK");
+Console.WriteLine("VLESS and Hysteria2, subscription, automatic device ID, Discord migration, routing, sing-box and Xray config checks: OK");
 
 sealed class StubHandler(Func<HttpRequestMessage, HttpResponseMessage> reply) : HttpMessageHandler
 {

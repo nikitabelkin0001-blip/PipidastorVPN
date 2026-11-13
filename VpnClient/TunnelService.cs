@@ -37,15 +37,18 @@ public sealed class TunnelService : IDisposable
         if (!File.Exists(xrayBinary) || !File.Exists(singBinary))
             throw new FileNotFoundException("В папке клиента нужны xray.exe и sing-box.exe. Переустановите Pipidastr VPN.");
 
-        var node = Vless.Parse(server.Link);
+        var hysteria = server.Link.StartsWith("hysteria2://", StringComparison.OrdinalIgnoreCase);
         var socksPort = FreePort();
         var httpPort = FreePort();
         while (httpPort == socksPort) httpPort = FreePort();
+        var transportConfig = hysteria
+            ? XrayConfigBuilder.Build(Hysteria.Parse(server.Link), socksPort, httpPort)
+            : XrayConfigBuilder.Build(Vless.Parse(server.Link), socksPort, httpPort);
         xrayConfig = Path.Combine(Path.GetTempPath(), "pipidastr-xray-" + Guid.NewGuid().ToString("N") + ".json");
         singConfig = Path.Combine(Path.GetTempPath(), "pipidastr-tun-" + Guid.NewGuid().ToString("N") + ".json");
         try
         {
-            await ConfigFile.WriteAsync(xrayConfig, XrayConfigBuilder.Build(node, socksPort, httpPort));
+            await ConfigFile.WriteAsync(xrayConfig, transportConfig);
             await ConfigFile.WriteAsync(singConfig, ConfigBuilder.Build(profile, socksPort));
             await CheckAsync(xrayBinary, "run", "-test", "-config", xrayConfig);
             await CheckAsync(singBinary, "check", "-c", singConfig);

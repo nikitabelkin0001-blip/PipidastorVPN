@@ -27,5 +27,39 @@
       <Setter Property="Foreground" Value="White"/><Setter Property="Background" Value="Transparent"/><Setter Property="Padding" Value="10,9"/><Setter Property="Margin" Value="0,3"/>
       <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ListBoxItem"><Border Background="{TemplateBinding Background}" CornerRadius="10" Padding="{TemplateBinding Padding}"><ContentPresenter/></Border><ControlTemplate.Triggers><Trigger Property="IsSelected" Value="True"><Setter Property="Background" Value="#394A78"/></Trigger><Trigger Property="IsMouseOver" Value="True"><Setter Property="Background" Value="#293A5B"/></Trigger></ControlTemplate.Triggers></ControlTemplate></Setter.Value></Setter>
     </Style>
+    <DataTemplate x:Key="AppItemTemplate">
+      <Grid Margin="0,2"><Grid.ColumnDefinitions><ColumnDefinition Width="42"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+        <Border Width="32" Height="32" Background="#394A78" CornerRadius="8" HorizontalAlignment="Left" VerticalAlignment="Center">
+          <Grid>
+            <Image x:Name="ProgramIcon" Source="{Binding Icon}" Width="25" Height="25" Stretch="Uniform"/>
+            <Image x:Name="ClientIcon" Source="/PipidastrVPN;component/Assets/pipidastr-logo.png" Width="29" Height="29" Stretch="Uniform" Visibility="Collapsed"/>
+          </Grid>
+        </Border>
+        <TextBlock Grid.Column="1" Text="{Binding Name}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" FontSize="14"/>
+      </Grid>
+      <DataTemplate.Triggers><DataTrigger Binding="{Binding Icon}" Value="{x:Null}"><Setter TargetName="ProgramIcon" Property="Visibility" Value="Collapsed"/><Setter TargetName="ClientIcon" Property="Visibility" Value="Visible"/></DataTrigger></DataTemplate.Triggers>
+    </DataTemplate>
+    <Style x:Key="AppScrollThumb" TargetType="Thumb">
+      <Setter Property="Background" Value="#536487"/>
+      <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Thumb"><Border Background="{TemplateBinding Background}" CornerRadius="5"/></ControlTemplate></Setter.Value></Setter>
+      <Style.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter Property="Background" Value="#8585FF"/></Trigger><Trigger Property="IsDragging" Value="True"><Setter Property="Background" Value="#A0A0FF"/></Trigger></Style.Triggers>
+    </Style>
+    <ControlTemplate x:Key="AppVerticalScrollBar" TargetType="ScrollBar">
+      <Grid Width="10" Background="#10182B"><Track x:Name="PART_Track" IsDirectionReversed="True">
+        <Track.DecreaseRepeatButton><RepeatButton Command="ScrollBar.PageUpCommand" Opacity="0" Focusable="False"/></Track.DecreaseRepeatButton>
+        <Track.Thumb><Thumb Style="{StaticResource AppScrollThumb}"/></Track.Thumb>
+        <Track.IncreaseRepeatButton><RepeatButton Command="ScrollBar.PageDownCommand" Opacity="0" Focusable="False"/></Track.IncreaseRepeatButton>
+      </Track></Grid>
+    </ControlTemplate>
+    <ControlTemplate x:Key="AppHorizontalScrollBar" TargetType="ScrollBar">
+      <Grid Height="10" Background="#10182B"><Track x:Name="PART_Track">
+        <Track.DecreaseRepeatButton><RepeatButton Command="ScrollBar.PageLeftCommand" Opacity="0" Focusable="False"/></Track.DecreaseRepeatButton>
+        <Track.Thumb><Thumb Style="{StaticResource AppScrollThumb}"/></Track.Thumb>
+        <Track.IncreaseRepeatButton><RepeatButton Command="ScrollBar.PageRightCommand" Opacity="0" Focusable="False"/></Track.IncreaseRepeatButton>
+      </Track></Grid>
+    </ControlTemplate>
+    <Style TargetType="ScrollBar"><Setter Property="Template" Value="{StaticResource AppVerticalScrollBar}"/>
+      <Style.Triggers><Trigger Property="Orientation" Value="Horizontal"><Setter Property="Template" Value="{StaticResource AppHorizontalScrollBar}"/></Trigger></Style.Triggers>
+    </Style>
   </Application.Resources>
 </Application>

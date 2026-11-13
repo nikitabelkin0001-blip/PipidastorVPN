@@ -1,11 +1,11 @@
-<Window x:Class="VpnClient.MainWindow" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Title="Pipidastr VPN" Width="1080" Height="760" MinWidth="880" MinHeight="660" WindowStartupLocation="CenterScreen" Background="{StaticResource Page}" Foreground="#F4F6FF" FontFamily="Segoe UI">
+<Window x:Class="VpnClient.MainWindow" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Title="Pipidastr VPN" Icon="/PipidastrVPN;component/Assets/pipidastr-logo.png" Width="1160" Height="760" MinWidth="960" MinHeight="660" WindowStartupLocation="CenterScreen" Background="{StaticResource Page}" Foreground="#F4F6FF" FontFamily="Segoe UI">
   <Grid Margin="24">
-    <Grid.ColumnDefinitions><ColumnDefinition Width="285"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+    <Grid.ColumnDefinitions><ColumnDefinition Width="355"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
     <Grid.RowDefinitions><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
     <Border Grid.Column="0" Background="{StaticResource Card}" CornerRadius="16" Padding="18">
       <DockPanel>
         <StackPanel DockPanel.Dock="Top">
-          <TextBlock Text="◈  PIPIDASTR VPN" FontWeight="Bold" FontSize="20" Margin="2,3,0,26"/>
+          <StackPanel Orientation="Horizontal" Margin="2,1,0,20"><Border Background="#394A78" Width="40" Height="40" CornerRadius="9" Margin="0,0,10,0"><Image Source="/PipidastrVPN;component/Assets/pipidastr-logo.png" Width="34" Height="34" Stretch="Uniform"/></Border><TextBlock Text="PIPIDASTR VPN" FontWeight="Bold" FontSize="20" VerticalAlignment="Center"/></StackPanel>
           <TextBlock Text="ПРОФИЛЬ" Foreground="{StaticResource Muted}" FontSize="11" FontWeight="Bold" Margin="2,0,0,8"/>
           <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
             <ComboBox x:Name="ProfilesBox" SelectionChanged="ProfilesBox_SelectionChanged"/>
@@ -15,10 +15,12 @@
             <TextBlock Text="СЕРВЕРЫ" Foreground="{StaticResource Muted}" FontSize="11" FontWeight="Bold"/>
             <TextBlock Grid.Column="1" x:Name="ServerCountText" Foreground="{StaticResource Muted}" FontSize="11" Text="0"/>
           </Grid>
+          <TextBlock Text="Поиск серверов" Foreground="{StaticResource Muted}" FontSize="11" Margin="2,0,0,5"/>
+          <TextBox x:Name="ServerSearchBox" TextChanged="ServerSearchBox_TextChanged" ToolTip="Поиск по названию сервера" Margin="0,0,0,10"/>
         </StackPanel>
         <StackPanel DockPanel.Dock="Bottom" Margin="0,8,0,0">
-          <Button Content="＋  Добавить ссылку сервера" Click="AddServer_Click" HorizontalAlignment="Stretch"/>
-          <Button Content="Удалить выбранный сервер" Click="DeleteServer_Click" HorizontalAlignment="Stretch" Margin="0,8,0,0" Background="#382738"/>
+          <Button x:Name="AddSubscriptionButton" Content="＋  Добавить подписку" Click="AddSubscription_Click" HorizontalAlignment="Stretch"/>
+          <Button Content="Удалить подписку" Click="DeleteSubscription_Click" HorizontalAlignment="Stretch" Margin="0,8,0,0" Background="#382738"/>
         </StackPanel>
         <ListBox x:Name="ServersList" SelectionChanged="ServersList_SelectionChanged" ScrollViewer.VerticalScrollBarVisibility="Auto" ScrollViewer.HorizontalScrollBarVisibility="Disabled" HorizontalContentAlignment="Stretch">
           <ListBox.ItemTemplate><DataTemplate>
@@ -59,9 +61,7 @@
             <StackPanel><TextBlock x:Name="AppsHeading" Text="Приложения через VPN" FontSize="17" FontWeight="SemiBold"/><TextBlock Text="Список этого профиля" Foreground="{StaticResource Muted}" FontSize="11" Margin="0,5,0,0"/></StackPanel>
             <Button Grid.Column="1" Content="Настроить приложения" Click="EditProfile_Click"/>
           </Grid>
-          <ListBox Grid.Row="1" x:Name="AppsList" Margin="0,12,0,0">
-            <ListBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding}" TextTrimming="CharacterEllipsis" ToolTip="{Binding}"/></DataTemplate></ListBox.ItemTemplate>
-          </ListBox>
+          <ListBox Grid.Row="1" x:Name="AppsList" Margin="0,12,0,0" ItemTemplate="{StaticResource AppItemTemplate}"/>
           <TextBlock Grid.Row="2" Text="Приложения и исключения меняются на странице профиля." Foreground="{StaticResource Muted}" FontSize="11" Margin="0,10,0,0"/>
         </Grid>
       </Border>

@@ -39,22 +39,25 @@ public sealed class DeviceIdentity
     }
 }
 
-public sealed record SubscriptionResult(List<ServerEntry> Servers, bool UsedDeviceId);
+public sealed record SubscriptionResult(List<ServerEntry> Servers, bool UsedDeviceId, int SkippedCount, string SkipSummary);
 
 public sealed class SubscriptionClient(HttpClient http, DeviceIdentity deviceIdentity)
 {
+    private static SubscriptionResult Result(SubscriptionParseResult parsed, bool usedDeviceId)
+        => new(parsed.Servers, usedDeviceId, parsed.SkippedCount, parsed.SkipSummary);
+
     public async Task<SubscriptionResult> FetchAsync(Uri uri, string? existingId = null, bool knownToNeedId = false)
     {
         if (uri.Scheme != Uri.UriSchemeHttps) throw new FormatException("Нужна HTTPS-ссылка на подписку.");
         if (existingId is { Length: > 0 })
-            return new(await FetchOnceAsync(uri, existingId), true);
+            return Result(await FetchOnceAsync(uri, existingId), true);
         if (knownToNeedId)
-            return new(await FetchWithGeneratedIdAsync(uri), true);
-        try { return new(await FetchOnceAsync(uri, null), false); }
-        catch (DeviceIdRequiredException) { return new(await FetchWithGeneratedIdAsync(uri), true); }
+            return Result(await FetchWithGeneratedIdAsync(uri), true);
+        try { return Result(await FetchOnceAsync(uri, null), false); }
+        catch (DeviceIdRequiredException) { return Result(await FetchWithGeneratedIdAsync(uri), true); }
     }
 
-    private async Task<List<ServerEntry>> FetchWithGeneratedIdAsync(Uri uri)
+    private async Task<SubscriptionParseResult> FetchWithGeneratedIdAsync(Uri uri)
     {
         var id = deviceIdentity.GetOrCreate();
         try { return await FetchOnceAsync(uri, id); }
@@ -64,7 +67,7 @@ public sealed class SubscriptionClient(HttpClient http, DeviceIdentity deviceIde
         }
     }
 
-    private async Task<List<ServerEntry>> FetchOnceAsync(Uri uri, string? deviceId)
+    private async Task<SubscriptionParseResult> FetchOnceAsync(Uri uri, string? deviceId)
     {
         using var request = new HttpRequestMessage(HttpMethod.Get, uri);
         request.Headers.UserAgent.ParseAdd("OrbitVPN/0.3");
@@ -86,6 +89,6 @@ public sealed class SubscriptionClient(HttpClient http, DeviceIdentity deviceIde
                 throw new FormatException("Достигнут лимит устройств подписки. Проверьте кабинет провайдера.");
             throw new HttpRequestException($"Сервер подписки ответил кодом {(int)response.StatusCode}.");
         }
-        return Vless.ParseSubscription(content);
+        return Vless.ParseSubscriptionDetailed(content);
     }
 }

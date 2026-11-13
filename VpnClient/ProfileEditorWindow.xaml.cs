@@ -37,7 +37,7 @@ public partial class ProfileEditorWindow : Window
         var full = ModeBox.SelectedIndex == 1;
         AppsHeading.Text = full ? "Исключения из VPN" : "Приложения через VPN";
         AppsList.ItemsSource = null;
-        AppsList.ItemsSource = full ? draft.DirectApplications : draft.Applications;
+        AppsList.ItemsSource = (full ? draft.DirectApplications : draft.Applications).Select(AppListItem.FromPath).ToList();
         ServerCount.Text = $"Серверов: {draft.Servers.Count}";
     }
 
@@ -54,6 +54,9 @@ public partial class ProfileEditorWindow : Window
             draft.SubscriptionUrl = uri.ToString(); draft.Servers = result.Servers;
             draft.SubscriptionNeedsDeviceId = result.UsedDeviceId; draft.SelectedServer = 0;
             RefreshLists();
+            if (result.SkippedCount > 0)
+                MessageBox.Show($"Добавлено серверов: {result.Servers.Count}. Пропущено: {result.SkippedCount}.\n{result.SkipSummary}",
+                    "Результат импорта", MessageBoxButton.OK, MessageBoxImage.Information);
         }
         catch (Exception ex) when (ex is HttpRequestException or FormatException or TaskCanceledException or InvalidDataException)
         { MessageBox.Show(ex.Message, "Не удалось обновить подписку", MessageBoxButton.OK, MessageBoxImage.Warning); }
@@ -75,8 +78,8 @@ public partial class ProfileEditorWindow : Window
     }
     private void RemoveApp_Click(object sender, RoutedEventArgs e)
     {
-        if (AppsList.SelectedItem is not string value) return;
-        (ModeBox.SelectedIndex == 1 ? draft.DirectApplications : draft.Applications).Remove(value);
+        if (AppsList.SelectedItem is not AppListItem value) return;
+        (ModeBox.SelectedIndex == 1 ? draft.DirectApplications : draft.Applications).Remove(value.Path);
         RefreshLists();
     }
     private void Exceptions_Click(object sender, RoutedEventArgs e)

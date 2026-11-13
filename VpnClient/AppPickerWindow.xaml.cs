@@ -6,11 +6,9 @@ using System.Windows.Data;
 
 namespace VpnClient;
 
-public sealed record AppCandidate(string Name, string Path);
-
 public partial class AppPickerWindow : Window
 {
-    private readonly List<AppCandidate> candidates;
+    private readonly List<AppListItem> candidates;
     public IReadOnlyList<string> SelectedPaths { get; private set; } = [];
 
     public AppPickerWindow()
@@ -21,9 +19,9 @@ public partial class AppPickerWindow : Window
         SearchBox.Focus();
     }
 
-    private static List<AppCandidate> RunningApplications()
+    private static List<AppListItem> RunningApplications()
     {
-        var found = new Dictionary<string, AppCandidate>(StringComparer.OrdinalIgnoreCase);
+        var found = new Dictionary<string, AppListItem>(StringComparer.OrdinalIgnoreCase);
         var windows = Environment.GetFolderPath(Environment.SpecialFolder.Windows) + System.IO.Path.DirectorySeparatorChar;
         foreach (var process in Process.GetProcesses())
         {
@@ -35,8 +33,7 @@ public partial class AppPickerWindow : Window
                     if (string.IsNullOrWhiteSpace(path) || !path.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)) continue;
                     if (path.StartsWith(windows, StringComparison.OrdinalIgnoreCase) && string.IsNullOrWhiteSpace(process.MainWindowTitle)) continue;
                     if (string.Equals(path, Environment.ProcessPath, StringComparison.OrdinalIgnoreCase)) continue;
-                    var name = System.IO.Path.GetFileNameWithoutExtension(path);
-                    found.TryAdd(path, new AppCandidate(name, path));
+                    found.TryAdd(path, AppListItem.FromPath(path));
                 }
                 catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException or NotSupportedException)
                 { /* Protected/system process: not selectable. */ }
@@ -50,7 +47,7 @@ public partial class AppPickerWindow : Window
         if (CandidatesList?.ItemsSource == null) return;
         var query = SearchBox.Text.Trim();
         CollectionViewSource.GetDefaultView(CandidatesList.ItemsSource).Filter = item =>
-            item is AppCandidate app && (query.Length == 0 || app.Name.Contains(query, StringComparison.CurrentCultureIgnoreCase) || app.Path.Contains(query, StringComparison.CurrentCultureIgnoreCase));
+            item is AppListItem app && (query.Length == 0 || app.Name.Contains(query, StringComparison.CurrentCultureIgnoreCase) || app.Path.Contains(query, StringComparison.CurrentCultureIgnoreCase));
     }
 
     private void Browse_Click(object sender, RoutedEventArgs e)
@@ -63,7 +60,7 @@ public partial class AppPickerWindow : Window
 
     private void Add_Click(object sender, RoutedEventArgs e)
     {
-        SelectedPaths = CandidatesList.SelectedItems.Cast<AppCandidate>().Select(x => x.Path).ToArray();
+        SelectedPaths = CandidatesList.SelectedItems.Cast<AppListItem>().Select(x => x.Path).ToArray();
         if (SelectedPaths.Count == 0)
         {
             MessageBox.Show("Выберите программу из списка или нажмите «Выбрать файл .exe…». ", "Pipidastr VPN", MessageBoxButton.OK, MessageBoxImage.Information);

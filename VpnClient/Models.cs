@@ -9,7 +9,7 @@ public sealed class ServerEntry
     public string Name { get; set; } = "Сервер";
     public string Link { get; set; } = "";
     public string Details => Uri.TryCreate(Link, UriKind.Absolute, out var uri)
-        ? $"{uri.Host}:{uri.Port}  ·  VLESS"
+        ? $"{uri.Host}:{uri.Port}  ·  {(uri.Scheme == "hysteria2" ? "Hysteria2" : "VLESS")}"
         : "VLESS";
     public override string ToString() => Name;
 }
