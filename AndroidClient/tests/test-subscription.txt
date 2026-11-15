@@ -1,0 +1,2 @@
+vless://bf000d23-0752-40b4-affe-68f7707a9661@example.com:443?security=reality&type=tcp&sni=www.example.com&pbk=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA#Test%20VLESS
+hysteria2://test-password@example.org:8443?sni=example.org#Test%20Hysteria2

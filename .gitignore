@@ -1,6 +1,11 @@
 .dotnet/
 .dotnet-cli/
 portable-build/
+.android-tools/
+AndroidClient/.gradle/
+AndroidClient/build/
+AndroidClient/app/build/
+AndroidClient/local.properties
 **/bin/
 **/obj/
 publish/
