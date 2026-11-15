@@ -5,6 +5,7 @@ portable-build/
 AndroidClient/.gradle/
 AndroidClient/build/
 AndroidClient/app/build/
+AndroidClient/app/libs/libbox.aar
 AndroidClient/local.properties
 **/bin/
 **/obj/
