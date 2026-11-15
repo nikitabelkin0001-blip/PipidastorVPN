@@ -11,6 +11,7 @@ import android.net.ConnectivityManager;
 import android.net.LinkProperties;
 import android.net.Network;
 import android.net.NetworkCapabilities;
+import android.net.NetworkRequest;
 import android.net.VpnService;
 import android.os.Build;
 import android.os.ParcelFileDescriptor;
@@ -257,7 +258,11 @@ public final class PipidastrVpnService extends VpnService implements PlatformInt
                 @Override public void onLost(Network network) { notifyDefaultNetwork(); }
                 @Override public void onLinkPropertiesChanged(Network network, LinkProperties properties) { notifyDefaultNetwork(); }
             };
-            connectivity.registerDefaultNetworkCallback(networkCallback);
+            NetworkRequest request = new NetworkRequest.Builder()
+                    .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                    .addCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN)
+                    .build();
+            connectivity.registerNetworkCallback(request, networkCallback);
         }
         notifyDefaultNetwork();
     }
@@ -281,6 +286,7 @@ public final class PipidastrVpnService extends VpnService implements PlatformInt
                 }
             } catch (Exception ex) { Log.w(TAG, "network monitor", ex); }
         }
+        listener.updateDefaultInterface("", -1, false, false);
     }
 
     private boolean hasUnderlyingNetwork() {
