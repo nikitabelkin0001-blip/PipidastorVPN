@@ -1,6 +1,9 @@
 package com.pipidastr.vpn;
 
 import android.app.Activity;
+import android.app.AlertDialog;
+import android.content.Intent;
+import android.content.pm.ResolveInfo;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
@@ -11,6 +14,7 @@ import android.view.ViewGroup;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.EditText;
+import android.widget.ImageButton;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ListView;
@@ -24,7 +28,11 @@ import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -48,6 +56,12 @@ public final class MainActivity extends Activity {
     private Button refresh;
     private ListView serverList;
     private boolean wideLayout;
+    private LinearLayout mobileBody;
+    private LinearLayout mobileMenu;
+    private ScrollView mobileScroll;
+    private ImageButton menuButton;
+    private TextView selectedAppsSummary;
+    private TextView profileValue;
     private int selectedServer = -1;
 
     @Override public void onCreate(Bundle state) {
@@ -62,11 +76,11 @@ public final class MainActivity extends Activity {
         if (wide) {
             setContentView(root);
         } else {
-            ScrollView scroll = new ScrollView(this);
-            scroll.setFillViewport(true);
-            scroll.setBackgroundColor(BACKGROUND);
-            scroll.addView(root);
-            setContentView(scroll);
+            mobileScroll = new ScrollView(this);
+            mobileScroll.setFillViewport(true);
+            mobileScroll.setBackgroundColor(BACKGROUND);
+            mobileScroll.addView(root);
+            setContentView(mobileScroll);
         }
         root.requestFocus();
 
@@ -79,9 +93,20 @@ public final class MainActivity extends Activity {
         LinearLayout.LayoutParams headingParams = new LinearLayout.LayoutParams(-2, -2);
         headingParams.leftMargin = dp(13);
         header.addView(heading, headingParams);
+        if (!wide) {
+            header.addView(new View(this), new LinearLayout.LayoutParams(0, 1, 1));
+            menuButton = new ImageButton(this);
+            menuButton.setImageResource(R.drawable.ic_menu);
+            menuButton.setContentDescription("Открыть меню");
+            menuButton.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
+            menuButton.setPadding(dp(11), dp(9), dp(11), dp(9));
+            menuButton.setBackground(round(FIELD));
+            header.addView(menuButton, new LinearLayout.LayoutParams(dp(46), dp(42)));
+        }
         root.addView(header);
 
         LinearLayout body = new LinearLayout(this);
+        mobileBody = body;
         body.setOrientation(wide ? LinearLayout.HORIZONTAL : LinearLayout.VERTICAL);
         LinearLayout.LayoutParams bodyParams = new LinearLayout.LayoutParams(-1, wide ? 0 : -2, wide ? 1 : 0);
         bodyParams.topMargin = dp(16);
@@ -118,7 +143,7 @@ public final class MainActivity extends Activity {
         sidebar.addView(urlInput, inputParams);
 
         refresh = new Button(this);
-        refresh.setText("Обновить сервера");
+        refresh.setText("Обновить серверы");
         refresh.setTextSize(14);
         refresh.setTextColor(Color.WHITE);
         refresh.setAllCaps(false);
@@ -191,7 +216,8 @@ public final class MainActivity extends Activity {
         profileCardParams.topMargin = dp(10);
         detailsColumn.addView(profileCard, profileCardParams);
         profileCard.addView(text("Текущий профиль", 21, Color.WHITE, true));
-        profileCard.addView(text("Приложения", 23, Color.WHITE, false));
+        profileValue = text("Приложения", 23, Color.WHITE, false);
+        profileCard.addView(profileValue);
 
         LinearLayout infoCard = card();
         LinearLayout.LayoutParams infoParams = new LinearLayout.LayoutParams(-1, -2);
@@ -205,13 +231,67 @@ public final class MainActivity extends Activity {
 
         if (!wide) {
             detailsColumn.removeView(connection);
+            detailsColumn.removeView(profileCard);
+            detailsColumn.removeView(infoCard);
             body.removeView(sidebar);
             body.removeView(detailsColumn);
+
+            sidebar.removeAllViews();
+            sidebar.addView(text("Подписка и серверы", 21, Color.WHITE, true));
+            sidebar.addView(serverCount, countParams);
+            sidebar.addView(list, listParams);
 
             body.addView(connection, new LinearLayout.LayoutParams(-1, -2));
             sidebarParams.topMargin = dp(14);
             body.addView(sidebar, sidebarParams);
-            body.addView(detailsColumn, new LinearLayout.LayoutParams(-1, -2));
+
+            mobileMenu = new LinearLayout(this);
+            mobileMenu.setOrientation(LinearLayout.VERTICAL);
+            mobileMenu.setVisibility(View.GONE);
+            LinearLayout.LayoutParams menuParams = new LinearLayout.LayoutParams(-1, -2);
+            menuParams.topMargin = dp(16);
+            root.addView(mobileMenu, menuParams);
+
+            LinearLayout subscriptionCard = card();
+            subscriptionCard.addView(text("Подписка", 21, Color.WHITE, true));
+            subscriptionCard.addView(urlInput, inputParams);
+            subscriptionCard.addView(refresh, refreshParams);
+            mobileMenu.addView(subscriptionCard);
+
+            LinearLayout appsCard = card();
+            LinearLayout.LayoutParams appsParams = new LinearLayout.LayoutParams(-1, -2);
+            appsParams.topMargin = dp(10);
+            mobileMenu.addView(appsCard, appsParams);
+            appsCard.addView(text("Приложения через VPN", 21, Color.WHITE, true));
+            selectedAppsSummary = text("", 15, MUTED, false);
+            appsCard.addView(selectedAppsSummary);
+            Button chooseApps = new Button(this);
+            chooseApps.setText("Выбрать приложения");
+            chooseApps.setTextSize(14);
+            chooseApps.setTextColor(Color.WHITE);
+            chooseApps.setAllCaps(false);
+            chooseApps.setBackground(round(FIELD));
+            LinearLayout.LayoutParams chooseParams = new LinearLayout.LayoutParams(-1, dp(48));
+            chooseParams.topMargin = dp(10);
+            appsCard.addView(chooseApps, chooseParams);
+            chooseApps.setOnClickListener(view -> chooseApps());
+
+            mobileMenu.addView(profileCard, profileCardParams);
+            mobileMenu.addView(infoCard, infoParams);
+            updateSelectedApps();
+            menuButton.setOnClickListener(view -> showMenu(mobileMenu.getVisibility() != View.VISIBLE));
+        } else {
+            body.removeView(sidebar);
+            detailsColumn.removeView(profileCard);
+            LinearLayout leftColumn = new LinearLayout(this);
+            leftColumn.setOrientation(LinearLayout.VERTICAL);
+            LinearLayout.LayoutParams leftParams = new LinearLayout.LayoutParams(dp(330), -1);
+            leftParams.rightMargin = dp(16);
+            body.addView(leftColumn, 0, leftParams);
+            leftColumn.addView(sidebar, new LinearLayout.LayoutParams(-1, 0, 1));
+            LinearLayout.LayoutParams leftProfileParams = new LinearLayout.LayoutParams(-1, -2);
+            leftProfileParams.topMargin = dp(10);
+            leftColumn.addView(profileCard, leftProfileParams);
         }
     }
 
@@ -239,6 +319,69 @@ public final class MainActivity extends Activity {
         view.setTextSize(size);
         if (bold) view.setTypeface(null, Typeface.BOLD);
         return view;
+    }
+
+    private void showMenu(boolean open) {
+        if (mobileMenu == null) return;
+        mobileBody.setVisibility(open ? View.GONE : View.VISIBLE);
+        mobileMenu.setVisibility(open ? View.VISIBLE : View.GONE);
+        menuButton.setImageResource(open ? R.drawable.ic_back : R.drawable.ic_menu);
+        menuButton.setContentDescription(open ? "Закрыть меню" : "Открыть меню");
+        mobileScroll.scrollTo(0, 0);
+    }
+
+    @Override public void onBackPressed() {
+        if (mobileMenu != null && mobileMenu.getVisibility() == View.VISIBLE) {
+            showMenu(false);
+            return;
+        }
+        super.onBackPressed();
+    }
+
+    private void updateSelectedApps() {
+        if (selectedAppsSummary == null) return;
+        int count = getPreferences(MODE_PRIVATE).getStringSet("selected_apps", new HashSet<>()).size();
+        selectedAppsSummary.setText(count == 0 ? "Приложения не выбраны" : "Выбрано приложений: " + count);
+        profileValue.setText("Приложения · " + count);
+    }
+
+    private void chooseApps() {
+        Intent launcher = new Intent(Intent.ACTION_MAIN);
+        launcher.addCategory(Intent.CATEGORY_LAUNCHER);
+        Map<String, String> appNames = new HashMap<>();
+        for (ResolveInfo app : getPackageManager().queryIntentActivities(launcher, 0)) {
+            if (app.activityInfo == null) continue;
+            String pkg = app.activityInfo.packageName;
+            if (!getPackageName().equals(pkg))
+                appNames.put(pkg, app.loadLabel(getPackageManager()).toString());
+        }
+        if (appNames.isEmpty()) {
+            new AlertDialog.Builder(this).setMessage("Установленные приложения не найдены.")
+                    .setPositiveButton("Закрыть", null).show();
+            return;
+        }
+
+        List<String> packages = new ArrayList<>(appNames.keySet());
+        packages.sort((left, right) -> appNames.get(left).compareToIgnoreCase(appNames.get(right)));
+        CharSequence[] labels = new CharSequence[packages.size()];
+        boolean[] checked = new boolean[packages.size()];
+        Set<String> saved = getPreferences(MODE_PRIVATE).getStringSet("selected_apps", new HashSet<>());
+        for (int i = 0; i < packages.size(); i++) {
+            String pkg = packages.get(i);
+            labels[i] = appNames.get(pkg) + "\n" + pkg;
+            checked[i] = saved.contains(pkg);
+        }
+        new AlertDialog.Builder(this)
+                .setTitle("Приложения через VPN")
+                .setMultiChoiceItems(labels, checked, (dialog, index, selected) -> checked[index] = selected)
+                .setNegativeButton("Отмена", null)
+                .setPositiveButton("Сохранить", (dialog, which) -> {
+                    Set<String> selection = new HashSet<>();
+                    for (int i = 0; i < packages.size(); i++)
+                        if (checked[i]) selection.add(packages.get(i));
+                    getPreferences(MODE_PRIVATE).edit().putStringSet("selected_apps", selection).apply();
+                    updateSelectedApps();
+                }).show();
     }
 
     private void refreshServers() {
@@ -270,6 +413,7 @@ public final class MainActivity extends Activity {
                     serverCount.setText("СЕРВЕРЫ · " + servers.size());
                     status.setText("Серверов: " + servers.size() + "; пропущено: " + result.skipped);
                     refresh.setEnabled(true);
+                    if (!wideLayout && !servers.isEmpty()) showMenu(false);
                 });
             } catch (Exception ex) {
                 runOnUiThread(() -> {
