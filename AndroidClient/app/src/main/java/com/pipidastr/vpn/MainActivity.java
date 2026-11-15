@@ -162,16 +162,9 @@ public final class MainActivity extends Activity {
         detailsColumn.setOrientation(LinearLayout.VERTICAL);
         body.addView(detailsColumn, new LinearLayout.LayoutParams(wide ? 0 : -1, wide ? -1 : -2, wide ? 1 : 0));
 
-        LinearLayout profileCard = card();
-        LinearLayout.LayoutParams profileCardParams = new LinearLayout.LayoutParams(-1, -2);
-        if (!wide) profileCardParams.topMargin = dp(14);
-        detailsColumn.addView(profileCard, profileCardParams);
-        profileCard.addView(text("Текущий профиль", 21, Color.WHITE, true));
-        profileCard.addView(text("Приложения", 23, Color.WHITE, false));
-
         LinearLayout connection = card();
         LinearLayout.LayoutParams connectionParams = new LinearLayout.LayoutParams(-1, -2);
-        connectionParams.topMargin = dp(10);
+        if (!wide) connectionParams.topMargin = dp(14);
         detailsColumn.addView(connection, connectionParams);
         connection.addView(text("НЕ ПОДКЛЮЧЕНО", 13, MUTED, true));
         connection.addView(text("Не подключено", 30, Color.WHITE, true));
@@ -193,6 +186,13 @@ public final class MainActivity extends Activity {
         connectParams.topMargin = dp(12);
         connection.addView(connect, connectParams);
 
+        LinearLayout profileCard = card();
+        LinearLayout.LayoutParams profileCardParams = new LinearLayout.LayoutParams(-1, -2);
+        profileCardParams.topMargin = dp(10);
+        detailsColumn.addView(profileCard, profileCardParams);
+        profileCard.addView(text("Текущий профиль", 21, Color.WHITE, true));
+        profileCard.addView(text("Приложения", 23, Color.WHITE, false));
+
         LinearLayout infoCard = card();
         LinearLayout.LayoutParams infoParams = new LinearLayout.LayoutParams(-1, -2);
         infoParams.topMargin = dp(10);
@@ -202,6 +202,17 @@ public final class MainActivity extends Activity {
         LinearLayout.LayoutParams statusParams = new LinearLayout.LayoutParams(-1, -2);
         statusParams.topMargin = dp(6);
         infoCard.addView(status, statusParams);
+
+        if (!wide) {
+            detailsColumn.removeView(connection);
+            body.removeView(sidebar);
+            body.removeView(detailsColumn);
+
+            body.addView(connection, new LinearLayout.LayoutParams(-1, -2));
+            sidebarParams.topMargin = dp(14);
+            body.addView(sidebar, sidebarParams);
+            body.addView(detailsColumn, new LinearLayout.LayoutParams(-1, -2));
+        }
     }
 
     private int dp(int value) { return Math.round(value * getResources().getDisplayMetrics().density); }
