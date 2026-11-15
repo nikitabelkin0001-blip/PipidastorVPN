@@ -46,11 +46,14 @@ public final class MainActivity extends Activity {
     private TextView serverDetails;
     private TextView serverCount;
     private Button refresh;
+    private ListView serverList;
+    private boolean wideLayout;
     private int selectedServer = -1;
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
         boolean wide = getResources().getConfiguration().screenWidthDp >= 700;
+        wideLayout = wide;
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setPadding(dp(22), dp(16), dp(22), dp(16));
@@ -115,7 +118,7 @@ public final class MainActivity extends Activity {
         sidebar.addView(urlInput, inputParams);
 
         refresh = new Button(this);
-        refresh.setText("Обновить серверы");
+        refresh.setText("Обновить сервера");
         refresh.setTextSize(14);
         refresh.setTextColor(Color.WHITE);
         refresh.setAllCaps(false);
@@ -126,6 +129,7 @@ public final class MainActivity extends Activity {
         sidebar.addView(refresh, refreshParams);
 
         ListView list = new ListView(this);
+        serverList = list;
         list.setDivider(null);
         list.setSelector(android.R.color.transparent);
         adapter = new ArrayAdapter<SubscriptionParser.Server>(this, android.R.layout.simple_list_item_1, servers) {
@@ -150,7 +154,7 @@ public final class MainActivity extends Activity {
             serverDetails.setText(server.host + ":" + server.port + " · " + server.protocol);
             adapter.notifyDataSetChanged();
         });
-        LinearLayout.LayoutParams listParams = new LinearLayout.LayoutParams(-1, wide ? 0 : dp(210), wide ? 1 : 0);
+        LinearLayout.LayoutParams listParams = new LinearLayout.LayoutParams(-1, 0, wide ? 1 : 0);
         listParams.topMargin = dp(10);
         sidebar.addView(list, listParams);
 
@@ -158,9 +162,16 @@ public final class MainActivity extends Activity {
         detailsColumn.setOrientation(LinearLayout.VERTICAL);
         body.addView(detailsColumn, new LinearLayout.LayoutParams(wide ? 0 : -1, wide ? -1 : -2, wide ? 1 : 0));
 
+        LinearLayout profileCard = card();
+        LinearLayout.LayoutParams profileCardParams = new LinearLayout.LayoutParams(-1, -2);
+        if (!wide) profileCardParams.topMargin = dp(14);
+        detailsColumn.addView(profileCard, profileCardParams);
+        profileCard.addView(text("Текущий профиль", 21, Color.WHITE, true));
+        profileCard.addView(text("Приложения", 23, Color.WHITE, false));
+
         LinearLayout connection = card();
         LinearLayout.LayoutParams connectionParams = new LinearLayout.LayoutParams(-1, -2);
-        if (!wide) connectionParams.topMargin = dp(14);
+        connectionParams.topMargin = dp(10);
         detailsColumn.addView(connection, connectionParams);
         connection.addView(text("НЕ ПОДКЛЮЧЕНО", 13, MUTED, true));
         connection.addView(text("Не подключено", 30, Color.WHITE, true));
@@ -182,19 +193,12 @@ public final class MainActivity extends Activity {
         connectParams.topMargin = dp(12);
         connection.addView(connect, connectParams);
 
-        LinearLayout profileCard = card();
-        LinearLayout.LayoutParams profileCardParams = new LinearLayout.LayoutParams(-1, -2);
-        profileCardParams.topMargin = dp(10);
-        detailsColumn.addView(profileCard, profileCardParams);
-        profileCard.addView(text("Текущий профиль", 21, Color.WHITE, true));
-        profileCard.addView(text("Приложения", 23, Color.WHITE, false));
-
         LinearLayout infoCard = card();
         LinearLayout.LayoutParams infoParams = new LinearLayout.LayoutParams(-1, -2);
         infoParams.topMargin = dp(10);
         detailsColumn.addView(infoCard, infoParams);
         infoCard.addView(text("Подписка и серверы", 21, Color.WHITE, true));
-        status = text("Введите HTTPS-ссылку на подписку. Подключение станет доступно после обновления.", 15, MUTED, false);
+        status = text("Введите HTTPS-ссылку на подписку, чтобы загрузить серверы. Подключение появится в следующем этапе разработки.", 15, MUTED, false);
         LinearLayout.LayoutParams statusParams = new LinearLayout.LayoutParams(-1, -2);
         statusParams.topMargin = dp(6);
         infoCard.addView(status, statusParams);
@@ -247,6 +251,11 @@ public final class MainActivity extends Activity {
                     servers.addAll(result.servers);
                     selectedServer = -1;
                     adapter.notifyDataSetChanged();
+                    if (!wideLayout) {
+                        LinearLayout.LayoutParams listLayout = (LinearLayout.LayoutParams) serverList.getLayoutParams();
+                        listLayout.height = dp(Math.min(servers.size() * 72, 252));
+                        serverList.setLayoutParams(listLayout);
+                    }
                     serverCount.setText("СЕРВЕРЫ · " + servers.size());
                     status.setText("Серверов: " + servers.size() + "; пропущено: " + result.skipped);
                     refresh.setEnabled(true);
