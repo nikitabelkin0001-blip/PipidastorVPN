@@ -86,6 +86,7 @@ public final class MainActivity extends Activity {
     private ListView serverList;
     private EditText serverSearch;
     private boolean wideLayout;
+    private boolean tvQuickToggle;
     private LinearLayout mobileBody;
     private LinearLayout mobileMenu;
     private ScrollView mobileScroll;
@@ -454,6 +455,12 @@ public final class MainActivity extends Activity {
         updateConnectionUi(PipidastrVpnService.currentState, PipidastrVpnService.currentMessage);
         Intent incoming = getIntent();
         handleIncomingIntent(incoming);
+        if (wide && isTvLauncherIntent(incoming) && selectedServer >= 0) {
+            tvQuickToggle = true;
+            toggleVpn();
+            if (VpnService.prepare(this) == null) finish();
+            return;
+        }
         if (urlInput.length() > 0 &&
                 (incoming == null || !Intent.ACTION_SEND.equals(incoming.getAction()))) refreshServers();
         if (wide) list.post(list::requestFocus);
@@ -463,6 +470,16 @@ public final class MainActivity extends Activity {
         super.onNewIntent(intent);
         setIntent(intent);
         handleIncomingIntent(intent);
+        if (wideLayout && isTvLauncherIntent(intent) && selectedServer >= 0) {
+            tvQuickToggle = true;
+            toggleVpn();
+            if (VpnService.prepare(this) == null) finish();
+        }
+    }
+
+    private static boolean isTvLauncherIntent(Intent intent) {
+        return intent != null && Intent.ACTION_MAIN.equals(intent.getAction()) &&
+                intent.hasCategory(Intent.CATEGORY_LEANBACK_LAUNCHER);
     }
 
     private void handleIncomingIntent(Intent intent) {
@@ -813,8 +830,12 @@ public final class MainActivity extends Activity {
     @Override protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
         if (requestCode == VPN_PERMISSION_REQUEST) {
-            if (resultCode == RESULT_OK) startVpn();
+            if (resultCode == RESULT_OK) {
+                startVpn();
+                if (tvQuickToggle) finish();
+            }
             else connectionMessage.setText("Разрешение VPN не предоставлено.");
+            tvQuickToggle = false;
         } else if (requestCode == QR_CAMERA_REQUEST) {
             Uri image = qrCameraImage;
             qrCameraImage = null;

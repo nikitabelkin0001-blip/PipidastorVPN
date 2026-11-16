@@ -1,4 +1,5 @@
 using System.Net.Http;
+using System.ComponentModel;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Data;
@@ -13,7 +14,12 @@ public partial class MainWindow : Window
     private readonly SubscriptionClient subscriptions;
     private List<ConnectionProfile> profiles = [];
     private ConnectionProfile? Current => ProfilesBox.SelectedItem as ConnectionProfile;
+    public bool HasConfiguredServer => Current?.Servers.Count > 0;
     private bool loading;
+    private bool connecting;
+    private bool exitRequested;
+    private readonly System.Windows.Forms.NotifyIcon tray;
+    private readonly System.Windows.Forms.ToolStripMenuItem trayToggle;
 
     public MainWindow()
     {
@@ -22,10 +28,26 @@ public partial class MainWindow : Window
         subscriptions = new SubscriptionClient(http, new DeviceIdentity());
         try { profiles = store.Load(); }
         catch (Exception ex) { MessageBox.Show(ex.Message, "Профили", MessageBoxButton.OK, MessageBoxImage.Warning); profiles = [new() { Name = "Приложения" }]; }
-        RefreshProfiles(profiles.FirstOrDefault());
+        RefreshProfiles(profiles.FirstOrDefault(profile => profile.LastSelected) ?? profiles.FirstOrDefault());
         tunnel.Log += line => Dispatcher.InvokeAsync(() => FooterText.Text = line.Length > 260 ? line[..260] : line);
         tunnel.Stopped += () => Dispatcher.InvokeAsync(() => SetConnectionState(false));
-        Closed += (_, _) => { tunnel.Dispose(); http.Dispose(); };
+        trayToggle = new System.Windows.Forms.ToolStripMenuItem("Подключить", null,
+            (_, _) => Dispatcher.InvokeAsync(ToggleFromExternal));
+        var trayOpen = new System.Windows.Forms.ToolStripMenuItem("Открыть Pipidastr", null,
+            (_, _) => Dispatcher.InvokeAsync(ShowFromExternal));
+        var trayExit = new System.Windows.Forms.ToolStripMenuItem("Выход", null,
+            (_, _) => Dispatcher.InvokeAsync(ExitApplication));
+        tray = new System.Windows.Forms.NotifyIcon
+        {
+            Icon = System.Drawing.Icon.ExtractAssociatedIcon(Environment.ProcessPath!) ?? System.Drawing.SystemIcons.Application,
+            Text = "Pipidastr VPN",
+            ContextMenuStrip = new System.Windows.Forms.ContextMenuStrip()
+        };
+        tray.ContextMenuStrip.Items.AddRange([trayToggle, trayOpen, trayExit]);
+        tray.DoubleClick += (_, _) => Dispatcher.InvokeAsync(ShowFromExternal);
+        tray.Visible = true;
+        Closing += OnClosing;
+        Closed += (_, _) => { tray.Visible = false; tray.Dispose(); tunnel.Dispose(); http.Dispose(); };
     }
 
     private void RefreshProfiles(ConnectionProfile? select)
@@ -36,6 +58,7 @@ public partial class MainWindow : Window
         ProfilesBox.SelectedItem = select ?? profiles.FirstOrDefault();
         loading = false;
         LoadProfile();
+        RememberCurrentProfile();
     }
 
     private void LoadProfile()
@@ -66,7 +89,18 @@ public partial class MainWindow : Window
         catch (Exception ex) { MessageBox.Show(ex.Message, "Не удалось сохранить", MessageBoxButton.OK, MessageBoxImage.Error); }
     }
 
-    private void ProfilesBox_SelectionChanged(object sender, SelectionChangedEventArgs e) { if (!loading) LoadProfile(); }
+    private void ProfilesBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (loading) return;
+        LoadProfile();
+        RememberCurrentProfile();
+    }
+
+    private void RememberCurrentProfile()
+    {
+        foreach (var profile in profiles) profile.LastSelected = ReferenceEquals(profile, Current);
+        Save();
+    }
 
     private void ServerSearchBox_TextChanged(object sender, TextChangedEventArgs e)
     {
@@ -160,13 +194,42 @@ public partial class MainWindow : Window
         Save(); LoadProfile();
     }
 
-    private async void Connect_Click(object sender, RoutedEventArgs e)
+    private async void Connect_Click(object sender, RoutedEventArgs e) => await ToggleConnectionAsync();
+
+    public void ToggleFromExternal() => _ = ToggleConnectionAsync();
+
+    public void ShowFromExternal()
     {
+        ShowInTaskbar = true;
+        Show();
+        WindowState = WindowState.Normal;
+        Activate();
+    }
+
+    private void OnClosing(object? sender, CancelEventArgs e)
+    {
+        if (exitRequested) return;
+        e.Cancel = true;
+        Hide();
+        ShowInTaskbar = false;
+    }
+
+    private void ExitApplication()
+    {
+        exitRequested = true;
+        Close();
+        System.Windows.Application.Current.Shutdown();
+    }
+
+    private async Task ToggleConnectionAsync()
+    {
+        if (connecting) return;
         if (tunnel.IsRunning) { tunnel.Stop(); return; }
         var profile = Current;
         if (profile == null || profile.Servers.Count == 0) { ShowError("Добавьте и выберите сервер."); return; }
         var server = profile.Servers[Math.Clamp(profile.SelectedServer, 0, profile.Servers.Count - 1)];
         ConnectButton.IsEnabled = false;
+        connecting = true;
         ConnectionLabel.Text = "ПОДКЛЮЧЕНИЕ";
         StatusText.Text = "Проверяю сервер…";
         try
@@ -176,7 +239,7 @@ public partial class MainWindow : Window
             FooterText.Text = "VPN-сервер ответил. Выходной IP: " + ip;
         }
         catch (Exception ex) { SetConnectionState(false); ShowError(ex.Message); }
-        finally { ConnectButton.IsEnabled = true; }
+        finally { connecting = false; ConnectButton.IsEnabled = true; }
     }
 
     private void SetConnectionState(bool connected)
@@ -184,6 +247,8 @@ public partial class MainWindow : Window
         ConnectionLabel.Text = connected ? "ПОДКЛЮЧЕНО" : "НЕ ПОДКЛЮЧЕНО";
         StatusText.Text = connected ? "Туннель запущен · сервер проверен" : "Не подключено";
         ConnectButton.Content = connected ? "Отключить" : "Подключить";
+        trayToggle.Text = connected ? "Отключить" : "Подключить";
+        tray.Text = connected ? "Pipidastr VPN — подключено" : "Pipidastr VPN — не подключено";
         ConnectButton.Background = (System.Windows.Media.Brush)FindResource(connected ? "BorderColor" : "Accent");
         ProfilesBox.IsHitTestVisible = !connected;
         ServersList.IsHitTestVisible = !connected;

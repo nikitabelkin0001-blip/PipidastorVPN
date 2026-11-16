@@ -4,12 +4,14 @@
     <TargetFramework>net9.0-windows</TargetFramework>
     <AssemblyName>PipidastrVPN</AssemblyName>
     <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>Assets\pipidastr-logo.ico</ApplicationIcon>
   </PropertyGroup>
   <ItemGroup>
+    <Content Include="Open Pipidastr.cmd" Link="Открыть Pipidastr.cmd" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="Always" />
     <Resource Include="Assets\pipidastr-logo.png" />
     <Content Include="third_party\sing-box-1.14.4-windows-amd64\sing-box.exe" Link="sing-box.exe" CopyToOutputDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
     <Content Include="third_party\sing-box-1.14.4-windows-amd64\libcronet.dll" Link="libcronet.dll" CopyToOutputDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
