@@ -2,23 +2,32 @@ package com.pipidastr.vpn;
 
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.content.ActivityNotFoundException;
 import android.content.BroadcastReceiver;
+import android.content.ContentValues;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.pm.ResolveInfo;
 import android.graphics.Color;
 import android.graphics.Typeface;
+import android.graphics.Bitmap;
+import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.GradientDrawable;
 import android.net.VpnService;
+import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.provider.MediaStore;
+import android.text.Editable;
+import android.text.TextWatcher;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.EditText;
+import android.widget.FrameLayout;
 import android.widget.ImageButton;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
@@ -44,6 +53,8 @@ import java.util.concurrent.Executors;
 
 public final class MainActivity extends Activity {
     private static final int VPN_PERMISSION_REQUEST = 491;
+    private static final int QR_CAMERA_REQUEST = 492;
+    private static final int QR_IMAGE_REQUEST = 493;
     private static final int MAX_SUBSCRIPTION_BYTES = 2_000_000;
     private static final int BACKGROUND = Color.rgb(10, 15, 32);
     private static final int CARD = Color.rgb(21, 30, 51);
@@ -53,6 +64,8 @@ public final class MainActivity extends Activity {
     private static final int MUTED = Color.rgb(149, 174, 221);
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
     private final List<SubscriptionParser.Server> servers = new ArrayList<>();
+    private final List<SubscriptionParser.Server> visibleServers = new ArrayList<>();
+    private final Set<String> compatibleLinks = new HashSet<>();
     private ArrayAdapter<SubscriptionParser.Server> adapter;
     private EditText urlInput;
     private TextView status;
@@ -61,6 +74,7 @@ public final class MainActivity extends Activity {
     private TextView serverCount;
     private Button refresh;
     private ListView serverList;
+    private EditText serverSearch;
     private boolean wideLayout;
     private LinearLayout mobileBody;
     private LinearLayout mobileMenu;
@@ -75,6 +89,8 @@ public final class MainActivity extends Activity {
     private Button connectButton;
     private int selectedServer = -1;
     private String displayedVpnState = "disconnected";
+    private Uri qrCameraImage;
+    private SubscriptionPairing.Session pairingSession;
     private final BroadcastReceiver vpnStatus = new BroadcastReceiver() {
         @Override public void onReceive(Context context, Intent intent) {
             updateConnectionUi(intent.getStringExtra(PipidastrVpnService.EXTRA_STATE),
@@ -84,6 +100,8 @@ public final class MainActivity extends Activity {
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
+        if (state != null && state.getString("qr_camera_image") != null)
+            qrCameraImage = Uri.parse(state.getString("qr_camera_image"));
         boolean wide = getResources().getConfiguration().screenWidthDp >= 700;
         wideLayout = wide;
         LinearLayout root = new LinearLayout(this);
@@ -91,15 +109,7 @@ public final class MainActivity extends Activity {
         root.setPadding(dp(22), dp(16), dp(22), dp(16));
         root.setBackgroundColor(BACKGROUND);
         root.setFocusableInTouchMode(true);
-        if (wide) {
-            setContentView(root);
-        } else {
-            mobileScroll = new ScrollView(this);
-            mobileScroll.setFillViewport(true);
-            mobileScroll.setBackgroundColor(BACKGROUND);
-            mobileScroll.addView(root);
-            setContentView(mobileScroll);
-        }
+        setContentView(root);
         root.requestFocus();
 
         LinearLayout header = new LinearLayout(this);
@@ -126,7 +136,7 @@ public final class MainActivity extends Activity {
         LinearLayout body = new LinearLayout(this);
         mobileBody = body;
         body.setOrientation(wide ? LinearLayout.HORIZONTAL : LinearLayout.VERTICAL);
-        LinearLayout.LayoutParams bodyParams = new LinearLayout.LayoutParams(-1, wide ? 0 : -2, wide ? 1 : 0);
+        LinearLayout.LayoutParams bodyParams = new LinearLayout.LayoutParams(-1, 0, 1);
         bodyParams.topMargin = dp(16);
         root.addView(body, bodyParams);
 
@@ -160,6 +170,28 @@ public final class MainActivity extends Activity {
         inputParams.topMargin = dp(12);
         sidebar.addView(urlInput, inputParams);
 
+        Button scanQr = new Button(this);
+        scanQr.setText("Добавить по QR-коду");
+        scanQr.setTextSize(14);
+        scanQr.setTextColor(Color.WHITE);
+        scanQr.setAllCaps(false);
+        scanQr.setBackground(round(FIELD));
+        scanQr.setOnClickListener(view -> chooseQrSource());
+        LinearLayout.LayoutParams qrParams = new LinearLayout.LayoutParams(-1, dp(48));
+        qrParams.topMargin = dp(10);
+        sidebar.addView(scanQr, qrParams);
+
+        Button showQr = new Button(this);
+        showQr.setText("Получить с телефона по QR");
+        showQr.setTextSize(14);
+        showQr.setTextColor(Color.WHITE);
+        showQr.setAllCaps(false);
+        showQr.setBackground(round(FIELD));
+        showQr.setOnClickListener(view -> showPairingQr());
+        LinearLayout.LayoutParams showQrParams = new LinearLayout.LayoutParams(-1, dp(48));
+        showQrParams.topMargin = dp(10);
+        if (wide) sidebar.addView(showQr, showQrParams);
+
         refresh = new Button(this);
         refresh.setText("Обновить серверы");
         refresh.setTextSize(14);
@@ -173,25 +205,30 @@ public final class MainActivity extends Activity {
 
         ListView list = new ListView(this);
         serverList = list;
-        list.setDivider(null);
+        list.setId(View.generateViewId());
+        list.setDivider(new ColorDrawable(Color.TRANSPARENT));
+        list.setDividerHeight(dp(wide ? 7 : 10));
         list.setSelector(android.R.color.transparent);
-        adapter = new ArrayAdapter<SubscriptionParser.Server>(this, android.R.layout.simple_list_item_1, servers) {
+        adapter = new ArrayAdapter<SubscriptionParser.Server>(this, android.R.layout.simple_list_item_1, visibleServers) {
             @Override public View getView(int position, View recycled, ViewGroup parent) {
                 TextView item = (TextView) super.getView(position, recycled, parent);
                 SubscriptionParser.Server server = getItem(position);
-                item.setText(server.name + "\n" + server.host + ":" + server.port + " · " + server.protocol);
-                item.setTextSize(15);
-                item.setTextColor(Color.WHITE);
+                boolean compatible = compatibleLinks.contains(server.link);
+                item.setText(server.name + "\n" + server.host + ":" + server.port + " · " +
+                        server.protocol + (compatible ? "" : " · нужен Xray"));
+                item.setTextSize(wide ? 14 : 15);
+                item.setTextColor(compatible ? Color.WHITE : MUTED);
                 item.setGravity(Gravity.CENTER_VERTICAL);
-                item.setMinHeight(dp(68));
-                item.setPadding(dp(14), dp(9), dp(10), dp(9));
-                item.setBackground(round(position == selectedServer ? SELECTED : FIELD));
+                item.setMinHeight(dp(wide ? 58 : 76));
+                item.setPadding(dp(14), dp(wide ? 7 : 12), dp(10), dp(wide ? 7 : 12));
+                item.setBackground(round(servers.indexOf(server) == selectedServer ? SELECTED : FIELD));
                 return item;
             }
         };
         list.setAdapter(adapter);
-        list.setOnItemClickListener((parent, view, position, id) -> selectServer(position));
-        LinearLayout.LayoutParams listParams = new LinearLayout.LayoutParams(-1, 0, wide ? 1 : 0);
+        list.setOnItemClickListener((parent, view, position, id) ->
+                selectServer(servers.indexOf(visibleServers.get(position))));
+        LinearLayout.LayoutParams listParams = new LinearLayout.LayoutParams(-1, 0, 1);
         listParams.topMargin = dp(10);
         sidebar.addView(list, listParams);
 
@@ -200,28 +237,32 @@ public final class MainActivity extends Activity {
         body.addView(detailsColumn, new LinearLayout.LayoutParams(wide ? 0 : -1, wide ? -1 : -2, wide ? 1 : 0));
 
         LinearLayout connection = card();
+        if (wide) connection.setPadding(dp(20), dp(8), dp(20), dp(8));
         LinearLayout.LayoutParams connectionParams = new LinearLayout.LayoutParams(-1, -2);
         if (!wide) connectionParams.topMargin = dp(14);
         detailsColumn.addView(connection, connectionParams);
-        connectionBadge = text("НЕ ПОДКЛЮЧЕНО", 13, MUTED, true);
-        connectionHeading = text("Не подключено", 30, Color.WHITE, true);
+        connectionBadge = text("НЕ ПОДКЛЮЧЕНО", wide ? 12 : 13, MUTED, true);
+        if (wide) connectionBadge.setVisibility(View.GONE);
+        connectionHeading = text("Не подключено", wide ? 26 : 30, Color.WHITE, true);
         connection.addView(connectionBadge);
         connection.addView(connectionHeading);
-        serverTitle = text("Сервер не выбран", 18, Color.WHITE, false);
+        serverTitle = text("Сервер не выбран", wide ? 17 : 18, Color.WHITE, false);
         LinearLayout.LayoutParams titleParams = new LinearLayout.LayoutParams(-1, -2);
-        titleParams.topMargin = dp(10);
+        titleParams.topMargin = dp(wide ? 5 : 10);
         connection.addView(serverTitle, titleParams);
-        serverDetails = text("Импортируйте подписку и выберите сервер", 14, MUTED, false);
+        serverDetails = text("Импортируйте подписку и выберите сервер", wide ? 13 : 14, MUTED, false);
+        if (wide) serverDetails.setVisibility(View.GONE);
         connection.addView(serverDetails);
         connectButton = new Button(this);
+        connectButton.setId(View.generateViewId());
         connectButton.setText("Подключить");
         connectButton.setTextSize(17);
         connectButton.setAllCaps(false);
         connectButton.setTextColor(Color.WHITE);
         connectButton.setBackground(round(ACCENT));
         connectButton.setOnClickListener(view -> toggleVpn());
-        LinearLayout.LayoutParams connectParams = new LinearLayout.LayoutParams(-1, dp(46));
-        connectParams.topMargin = dp(12);
+        LinearLayout.LayoutParams connectParams = new LinearLayout.LayoutParams(-1, dp(wide ? 42 : 46));
+        connectParams.topMargin = dp(wide ? 6 : 12);
         connection.addView(connectButton, connectParams);
         connectionMessage = text("", 14, MUTED, false);
         connection.addView(connectionMessage);
@@ -254,22 +295,46 @@ public final class MainActivity extends Activity {
             sidebar.removeAllViews();
             sidebar.addView(text("Подписка и серверы", 21, Color.WHITE, true));
             sidebar.addView(serverCount, countParams);
+            serverSearch = new EditText(this);
+            serverSearch.setSingleLine(true);
+            serverSearch.setHint("Поиск серверов");
+            serverSearch.setTextSize(15);
+            serverSearch.setTextColor(Color.WHITE);
+            serverSearch.setHintTextColor(MUTED);
+            serverSearch.setPadding(dp(12), 0, dp(12), 0);
+            serverSearch.setBackground(round(FIELD));
+            LinearLayout.LayoutParams searchParams = new LinearLayout.LayoutParams(-1, dp(46));
+            searchParams.topMargin = dp(10);
+            sidebar.addView(serverSearch, searchParams);
+            serverSearch.addTextChangedListener(new TextWatcher() {
+                @Override public void beforeTextChanged(CharSequence text, int start, int count, int after) { }
+                @Override public void onTextChanged(CharSequence text, int start, int before, int count) {
+                    applyServerFilter();
+                }
+                @Override public void afterTextChanged(Editable text) { }
+            });
             sidebar.addView(list, listParams);
 
             body.addView(connection, new LinearLayout.LayoutParams(-1, -2));
             sidebarParams.topMargin = dp(14);
+            sidebarParams.height = 0;
+            sidebarParams.weight = 1;
             body.addView(sidebar, sidebarParams);
 
             mobileMenu = new LinearLayout(this);
             mobileMenu.setOrientation(LinearLayout.VERTICAL);
-            mobileMenu.setVisibility(View.GONE);
-            LinearLayout.LayoutParams menuParams = new LinearLayout.LayoutParams(-1, -2);
+            mobileScroll = new ScrollView(this);
+            mobileScroll.setFillViewport(true);
+            mobileScroll.setVisibility(View.GONE);
+            mobileScroll.addView(mobileMenu);
+            LinearLayout.LayoutParams menuParams = new LinearLayout.LayoutParams(-1, 0, 1);
             menuParams.topMargin = dp(16);
-            root.addView(mobileMenu, menuParams);
+            root.addView(mobileScroll, menuParams);
 
             LinearLayout subscriptionCard = card();
             subscriptionCard.addView(text("Подписка", 21, Color.WHITE, true));
             subscriptionCard.addView(urlInput, inputParams);
+            subscriptionCard.addView(scanQr, qrParams);
             subscriptionCard.addView(refresh, refreshParams);
             mobileMenu.addView(subscriptionCard);
 
@@ -294,29 +359,83 @@ public final class MainActivity extends Activity {
             mobileMenu.addView(profileCard, profileCardParams);
             mobileMenu.addView(infoCard, infoParams);
             updateSelectedApps();
-            menuButton.setOnClickListener(view -> showMenu(mobileMenu.getVisibility() != View.VISIBLE));
+            menuButton.setOnClickListener(view -> showMenu(mobileScroll.getVisibility() != View.VISIBLE));
         } else {
             body.removeView(sidebar);
             detailsColumn.removeView(profileCard);
-            LinearLayout leftColumn = new LinearLayout(this);
-            leftColumn.setOrientation(LinearLayout.VERTICAL);
-            LinearLayout.LayoutParams leftParams = new LinearLayout.LayoutParams(dp(330), -1);
-            leftParams.rightMargin = dp(16);
-            body.addView(leftColumn, 0, leftParams);
-            leftColumn.addView(sidebar, new LinearLayout.LayoutParams(-1, 0, 1));
-            LinearLayout.LayoutParams leftProfileParams = new LinearLayout.LayoutParams(-1, -2);
-            leftProfileParams.topMargin = dp(10);
-            leftColumn.addView(profileCard, leftProfileParams);
+            detailsColumn.removeView(infoCard);
+            sidebar.removeAllViews();
+            LinearLayout.LayoutParams tvCountParams = new LinearLayout.LayoutParams(-1, -2);
+            sidebar.addView(serverCount, tvCountParams);
+            sidebar.addView(list, listParams);
+            LinearLayout.LayoutParams sidebarLayout = new LinearLayout.LayoutParams(dp(330), -1);
+            sidebarLayout.rightMargin = dp(16);
+            body.addView(sidebar, 0, sidebarLayout);
+            list.setNextFocusRightId(connectButton.getId());
+            connectButton.setNextFocusLeftId(list.getId());
+
+            LinearLayout profileSettings = card();
+            profileSettings.addView(text("ПРОФИЛЬ", 12, MUTED, true));
+            profileSettings.addView(text("Текущий профиль", 17, Color.WHITE, true));
+            profileCard.removeView(profileValue);
+            profileValue.setTextSize(18);
+            profileSettings.addView(profileValue);
+            Button chooseApps = new Button(this);
+            chooseApps.setText("Выбрать приложения");
+            chooseApps.setTextSize(14);
+            chooseApps.setTextColor(Color.WHITE);
+            chooseApps.setAllCaps(false);
+            chooseApps.setBackground(round(FIELD));
+            LinearLayout.LayoutParams chooseParams = new LinearLayout.LayoutParams(-1, dp(40));
+            chooseParams.topMargin = dp(6);
+            profileSettings.addView(chooseApps, chooseParams);
+            chooseApps.setOnClickListener(view -> chooseApps());
+            LinearLayout.LayoutParams tvCardParams = new LinearLayout.LayoutParams(-1, -2);
+            tvCardParams.topMargin = dp(10);
+            detailsColumn.addView(profileSettings, tvCardParams);
+
+            LinearLayout subscriptionCard = card();
+            subscriptionCard.addView(text("Подписка", 18, Color.WHITE, true));
+            Button addSubscription = new Button(this);
+            addSubscription.setText("Добавить подписку");
+            addSubscription.setTextSize(14);
+            addSubscription.setTextColor(Color.WHITE);
+            addSubscription.setAllCaps(false);
+            addSubscription.setBackground(round(FIELD));
+            LinearLayout.LayoutParams addParams = new LinearLayout.LayoutParams(-1, dp(42));
+            addParams.topMargin = dp(6);
+            subscriptionCard.addView(addSubscription, addParams);
+            addSubscription.setOnClickListener(view -> showSubscriptionActions());
+            status.setTextSize(13);
+            infoCard.removeView(status);
+            subscriptionCard.addView(status);
+            LinearLayout.LayoutParams subscriptionParams = new LinearLayout.LayoutParams(-1, -2);
+            subscriptionParams.topMargin = dp(10);
+            detailsColumn.addView(subscriptionCard, subscriptionParams);
+
+            updateSelectedApps();
         }
         restoreServer();
         refreshConnectButton();
         updateConnectionUi(PipidastrVpnService.currentState, PipidastrVpnService.currentMessage);
-        acceptSharedServer(getIntent());
+        Intent incoming = getIntent();
+        handleIncomingIntent(incoming);
+        if (urlInput.length() > 0 &&
+                (incoming == null || !Intent.ACTION_SEND.equals(incoming.getAction()))) refreshServers();
     }
 
     @Override protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
         setIntent(intent);
+        handleIncomingIntent(intent);
+    }
+
+    private void handleIncomingIntent(Intent intent) {
+        if (intent != null && Intent.ACTION_VIEW.equals(intent.getAction()) && intent.getData() != null &&
+                SubscriptionPairing.isPairingQr(intent.getDataString())) {
+            sendSubscriptionToTv(intent.getDataString());
+            return;
+        }
         acceptSharedServer(intent);
     }
 
@@ -325,7 +444,9 @@ public final class MainActivity extends Activity {
         selectedServer = index;
         SubscriptionParser.Server server = servers.get(index);
         serverTitle.setText(server.name);
-        serverDetails.setText(server.host + ":" + server.port + " · " + server.protocol);
+        String details = server.host + ":" + server.port + " · " + server.protocol;
+        if (!compatibleLinks.contains(server.link)) details += " · Этот сервер требует Xray-ядро";
+        serverDetails.setText(details);
         getPreferences(MODE_PRIVATE).edit().putString("selected_link", server.link).apply();
         adapter.notifyDataSetChanged();
         refreshConnectButton();
@@ -336,10 +457,11 @@ public final class MainActivity extends Activity {
         if (link.isEmpty()) return;
         try {
             SubscriptionParser.Result parsed = SubscriptionParser.parse(link);
-            servers.add(parsed.servers.get(0));
-            adapter.notifyDataSetChanged();
-            serverCount.setText("СЕРВЕРЫ · " + servers.size());
-            resizeServerList();
+            SubscriptionParser.Server server = parsed.servers.get(0);
+            servers.add(server);
+            try { SingBoxConfig.build(server); compatibleLinks.add(server.link); }
+            catch (Exception ignored) { }
+            applyServerFilter();
             selectServer(0);
         } catch (Exception ignored) { }
     }
@@ -354,6 +476,15 @@ public final class MainActivity extends Activity {
                     android.util.Base64.URL_SAFE | android.util.Base64.NO_WRAP), StandardCharsets.UTF_8);
         }
         if (link == null) return;
+        if (link.trim().startsWith("https://")) {
+            urlInput.setText(link.trim());
+            refreshServers();
+            return;
+        }
+        importServerLink(link);
+    }
+
+    private boolean importServerLink(String link) {
         try {
             SubscriptionParser.Result parsed = SubscriptionParser.parse(link.trim());
             SubscriptionParser.Server server = parsed.servers.get(0);
@@ -361,21 +492,30 @@ public final class MainActivity extends Activity {
             if ((getApplicationInfo().flags & android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0)
                 io.nekohasekai.libbox.Libbox.checkConfig(config);
             servers.add(server);
-            adapter.notifyDataSetChanged();
-            serverCount.setText("СЕРВЕРЫ · " + servers.size());
-            resizeServerList();
+            compatibleLinks.add(server.link);
+            applyServerFilter();
             selectServer(servers.size() - 1);
             if (!wideLayout) showMenu(false);
+            return true;
         } catch (Exception ex) {
             connectionMessage.setText("Не удалось импортировать сервер: " + ex.getMessage());
+            return false;
         }
     }
 
-    private void resizeServerList() {
-        if (wideLayout) return;
-        LinearLayout.LayoutParams params = (LinearLayout.LayoutParams) serverList.getLayoutParams();
-        params.height = dp(Math.min(servers.size() * 72, 252));
-        serverList.setLayoutParams(params);
+    private void applyServerFilter() {
+        String query = serverSearch == null ? "" :
+                serverSearch.getText().toString().trim().toLowerCase(java.util.Locale.ROOT);
+        visibleServers.clear();
+        for (SubscriptionParser.Server server : servers) {
+            if (query.isEmpty() || server.name.toLowerCase(java.util.Locale.ROOT).contains(query) ||
+                    server.host.toLowerCase(java.util.Locale.ROOT).contains(query) ||
+                    server.protocol.toLowerCase(java.util.Locale.ROOT).contains(query))
+                visibleServers.add(server);
+        }
+        adapter.notifyDataSetChanged();
+        serverCount.setText("СЕРВЕРЫ · " + (query.isEmpty() ? servers.size() :
+                visibleServers.size() + " / " + servers.size()));
     }
 
     @Override protected void onStart() {
@@ -421,10 +561,10 @@ public final class MainActivity extends Activity {
     private void showMenu(boolean open) {
         if (mobileMenu == null) return;
         mobileBody.setVisibility(open ? View.GONE : View.VISIBLE);
-        mobileMenu.setVisibility(open ? View.VISIBLE : View.GONE);
+        mobileScroll.setVisibility(open ? View.VISIBLE : View.GONE);
         menuButton.setImageResource(open ? R.drawable.ic_back : R.drawable.ic_menu);
-        menuButton.setContentDescription(open ? "Закрыть меню" : "Открыть меню");
-        mobileScroll.scrollTo(0, 0);
+        menuButton.setContentDescription(open ? "Закрыть настройки" : "Открыть настройки");
+        if (mobileScroll != null) mobileScroll.scrollTo(0, 0);
     }
 
     private void refreshConnectButton() {
@@ -432,7 +572,9 @@ public final class MainActivity extends Activity {
         String state = displayedVpnState;
         boolean busy = "connecting".equals(state);
         boolean connected = "connected".equals(state);
-        boolean enabled = !busy && (connected || selectedServer >= 0);
+        boolean supported = selectedServer >= 0 && selectedServer < servers.size() &&
+                compatibleLinks.contains(servers.get(selectedServer).link);
+        boolean enabled = !busy && (connected || supported);
         connectButton.setEnabled(enabled);
         connectButton.setAlpha(enabled ? 1f : 0.65f);
         connectButton.setText(busy ? "Подключение…" : connected ? "Отключить" : "Подключить");
@@ -466,9 +608,195 @@ public final class MainActivity extends Activity {
 
     @Override protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
-        if (requestCode != VPN_PERMISSION_REQUEST) return;
-        if (resultCode == RESULT_OK) startVpn();
-        else connectionMessage.setText("Разрешение VPN не предоставлено.");
+        if (requestCode == VPN_PERMISSION_REQUEST) {
+            if (resultCode == RESULT_OK) startVpn();
+            else connectionMessage.setText("Разрешение VPN не предоставлено.");
+        } else if (requestCode == QR_CAMERA_REQUEST) {
+            Uri image = qrCameraImage;
+            qrCameraImage = null;
+            if (resultCode == RESULT_OK && image != null) decodeQrImage(image, true);
+            else if (image != null) deleteQrPhoto(image);
+        } else if (requestCode == QR_IMAGE_REQUEST && resultCode == RESULT_OK && data != null) {
+            decodeQrImage(data.getData(), false);
+        }
+    }
+
+    @Override protected void onSaveInstanceState(Bundle state) {
+        if (qrCameraImage != null) state.putString("qr_camera_image", qrCameraImage.toString());
+        super.onSaveInstanceState(state);
+    }
+
+    private void chooseQrSource() {
+        boolean camera = getPackageManager().hasSystemFeature(android.content.pm.PackageManager.FEATURE_CAMERA_ANY);
+        String[] choices = camera ? new String[] {"Сфотографировать QR", "Выбрать изображение"}
+                : new String[] {"Выбрать изображение"};
+        new AlertDialog.Builder(this).setTitle("Добавить подписку по QR-коду")
+                .setItems(choices, (dialog, index) -> {
+                    if (camera && index == 0) captureQrImage();
+                    else pickQrImage();
+                }).show();
+    }
+
+    private void showSubscriptionActions() {
+        String[] actions = {"Ввести ссылку", "Добавить по QR-коду",
+                "Получить с телефона по QR", "Обновить серверы"};
+        new AlertDialog.Builder(this).setTitle("Добавить подписку")
+                .setItems(actions, (dialog, index) -> {
+                    if (index == 0) showManualSubscriptionDialog();
+                    else if (index == 1) chooseQrSource();
+                    else if (index == 2) showPairingQr();
+                    else refreshServers();
+                }).show();
+    }
+
+    private void showManualSubscriptionDialog() {
+        EditText input = new EditText(this);
+        input.setSingleLine(true);
+        input.setHint("HTTPS-ссылка на подписку");
+        input.setInputType(android.text.InputType.TYPE_CLASS_TEXT |
+                android.text.InputType.TYPE_TEXT_VARIATION_URI);
+        input.setText(urlInput.getText());
+        new AlertDialog.Builder(this).setTitle("Ссылка на подписку")
+                .setView(input)
+                .setNegativeButton("Отмена", null)
+                .setPositiveButton("Сохранить", (dialog, which) -> {
+                    String address = input.getText().toString().trim();
+                    if (!address.startsWith("https://")) {
+                        showQrError("Нужна HTTPS-ссылка на подписку.");
+                        return;
+                    }
+                    urlInput.setText(address);
+                    refreshServers();
+                }).show();
+    }
+
+    private void captureQrImage() {
+        ContentValues values = new ContentValues();
+        values.put(MediaStore.Images.Media.DISPLAY_NAME, "pipidastr-qr-" + System.currentTimeMillis() + ".jpg");
+        values.put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg");
+        try {
+            Uri image = getContentResolver().insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values);
+            if (image == null) throw new IllegalStateException("Не удалось создать снимок.");
+            qrCameraImage = image;
+            Intent intent = new Intent(MediaStore.ACTION_IMAGE_CAPTURE)
+                    .putExtra(MediaStore.EXTRA_OUTPUT, image)
+                    .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
+            startActivityForResult(intent, QR_CAMERA_REQUEST);
+        } catch (Exception ex) {
+            if (qrCameraImage != null) deleteQrPhoto(qrCameraImage);
+            qrCameraImage = null;
+            showQrError("Камера недоступна. Выберите изображение с QR-кодом.");
+        }
+    }
+
+    private void pickQrImage() {
+        try {
+            Intent intent = new Intent(Intent.ACTION_GET_CONTENT).setType("image/*")
+                    .addCategory(Intent.CATEGORY_OPENABLE);
+            startActivityForResult(intent, QR_IMAGE_REQUEST);
+        } catch (ActivityNotFoundException ex) {
+            showQrError("На устройстве нет приложения для выбора изображения.");
+        }
+    }
+
+    private void decodeQrImage(Uri image, boolean deleteAfterwards) {
+        if (image == null) { showQrError("Изображение не выбрано."); return; }
+        status.setText("Считываю QR-код…");
+        worker.execute(() -> {
+            try {
+                String value = QrSubscriptionDecoder.decode(getContentResolver(), image);
+                runOnUiThread(() -> {
+                    if (isFinishing() || isDestroyed()) return;
+                    if (value.startsWith("https://")) {
+                        urlInput.setText(value);
+                        refreshServers();
+                    } else if (SubscriptionPairing.isPairingQr(value)) {
+                        sendSubscriptionToTv(value);
+                    } else if (value.startsWith("vless://") || value.startsWith("hysteria2://")) {
+                        if (importServerLink(value)) status.setText("Сервер добавлен из QR-кода.");
+                    } else showQrError("QR-код не содержит HTTPS-подписку или ссылку сервера.");
+                });
+            } catch (Exception ex) {
+                runOnUiThread(() -> { if (!isFinishing() && !isDestroyed()) showQrError(ex.getMessage()); });
+            } finally {
+                if (deleteAfterwards) deleteQrPhoto(image);
+            }
+        });
+    }
+
+    private void showQrError(String message) {
+        status.setText(message);
+        new AlertDialog.Builder(this).setTitle("QR-код")
+                .setMessage(message).setPositiveButton("Закрыть", null).show();
+    }
+
+    private void showPairingQr() {
+        try {
+            if (pairingSession != null) pairingSession.close();
+            SubscriptionPairing.Session session = new SubscriptionPairing.Session(this);
+            pairingSession = session;
+            Bitmap bitmap = QrSubscriptionDecoder.encode(session.qrContent());
+            ImageView image = new ImageView(this);
+            image.setImageBitmap(bitmap);
+            image.setContentDescription("QR-код для передачи подписки с телефона");
+            image.setBackgroundColor(Color.WHITE);
+            int size = Math.min(dp(270), (int) (getResources().getDisplayMetrics().heightPixels * 0.52f));
+            FrameLayout frame = new FrameLayout(this);
+            frame.setPadding(dp(12), dp(12), dp(12), dp(12));
+            frame.addView(image, new FrameLayout.LayoutParams(size, size, Gravity.CENTER));
+            AlertDialog dialog = new AlertDialog.Builder(this)
+                    .setTitle("Передать подписку с телефона")
+                    .setMessage("Откройте Pipidastr VPN на телефоне и выберите «Добавить по QR-коду». Код действует 2 минуты.")
+                    .setView(frame)
+                    .setPositiveButton("Закрыть", null)
+                    .create();
+            dialog.setOnDismissListener(ignored -> {
+                if (pairingSession == session) { pairingSession = null; session.close(); }
+                bitmap.recycle();
+            });
+            dialog.show();
+            session.waitForSubscription(url -> runOnUiThread(() -> {
+                if (pairingSession != session || isFinishing() || isDestroyed()) return;
+                pairingSession = null;
+                dialog.dismiss();
+                urlInput.setText(url);
+                refreshServers();
+            }), error -> runOnUiThread(() -> {
+                if (pairingSession != session || isFinishing() || isDestroyed()) return;
+                pairingSession = null;
+                dialog.dismiss();
+                showQrError(error instanceof java.net.SocketTimeoutException ?
+                        "Время ожидания истекло. Откройте новый QR-код." :
+                        "Не удалось передать подписку. Проверьте Wi-Fi обоих устройств.");
+            }));
+        } catch (Exception ex) { showQrError(ex.getMessage()); }
+    }
+
+    private void sendSubscriptionToTv(String qr) {
+        String subscription = urlInput.getText().toString().trim();
+        if (subscription.isEmpty()) subscription = getPreferences(MODE_PRIVATE).getString("subscription_url", "");
+        final String url = subscription;
+        if (url.isEmpty()) { showQrError("Сначала добавьте HTTPS-подписку на телефоне."); return; }
+        status.setText("Передаю подписку на телевизор…");
+        worker.execute(() -> {
+            try {
+                SubscriptionPairing.send(this, qr, url);
+                runOnUiThread(() -> {
+                    if (isFinishing() || isDestroyed()) return;
+                    status.setText("Подписка передана на телевизор.");
+                    new AlertDialog.Builder(this).setMessage("Подписка передана на телевизор.")
+                            .setPositiveButton("Закрыть", null).show();
+                });
+            } catch (Exception ex) {
+                runOnUiThread(() -> { if (!isFinishing() && !isDestroyed())
+                    showQrError("Не удалось передать подписку: " + ex.getMessage()); });
+            }
+        });
+    }
+
+    private void deleteQrPhoto(Uri image) {
+        try { getContentResolver().delete(image, null, null); }
+        catch (Exception ignored) { }
     }
 
     private void startVpn() {
@@ -488,7 +816,7 @@ public final class MainActivity extends Activity {
     }
 
     @Override public void onBackPressed() {
-        if (mobileMenu != null && mobileMenu.getVisibility() == View.VISIBLE) {
+        if (!wideLayout && mobileScroll != null && mobileScroll.getVisibility() == View.VISIBLE) {
             showMenu(false);
             return;
         }
@@ -496,9 +824,9 @@ public final class MainActivity extends Activity {
     }
 
     private void updateSelectedApps() {
-        if (selectedAppsSummary == null) return;
         int count = getPreferences(MODE_PRIVATE).getStringSet("selected_apps", new HashSet<>()).size();
-        selectedAppsSummary.setText(count == 0 ? "Весь трафик через VPN" : "Выбрано приложений: " + count);
+        if (selectedAppsSummary != null)
+            selectedAppsSummary.setText(count == 0 ? "Весь трафик через VPN" : "Выбрано приложений: " + count);
         profileValue.setText(count == 0 ? "Весь трафик" : "Приложения · " + count);
         profileName.setText(count == 0 ? "Весь трафик" : "Приложения · " + count);
     }
@@ -557,29 +885,34 @@ public final class MainActivity extends Activity {
         worker.execute(() -> {
             try {
                 SubscriptionParser.Result result = fetch(address);
-                List<SubscriptionParser.Server> compatible = new ArrayList<>();
+                Set<String> supported = new HashSet<>();
                 int unsupported = 0;
                 for (SubscriptionParser.Server server : result.servers) {
-                    try { SingBoxConfig.build(server); compatible.add(server); }
+                    try { SingBoxConfig.build(server); supported.add(server.link); }
                     catch (Exception ex) { unsupported++; }
                 }
-                if (compatible.isEmpty()) throw new IOException("В подписке нет серверов, совместимых с Android-ядром.");
-                int skipped = result.skipped + unsupported;
+                if (result.servers.isEmpty()) throw new IOException("В подписке нет серверов.");
+                int supportedCount = result.servers.size() - unsupported;
                 runOnUiThread(() -> {
                     if (isFinishing() || isDestroyed()) return;
                     String previousLink = getPreferences(MODE_PRIVATE).getString("selected_link", "");
                     servers.clear();
-                    servers.addAll(compatible);
+                    servers.addAll(result.servers);
+                    compatibleLinks.clear();
+                    compatibleLinks.addAll(supported);
                     selectedServer = -1;
                     serverTitle.setText("Сервер не выбран");
                     serverDetails.setText("Выберите сервер из списка");
-                    adapter.notifyDataSetChanged();
-                    resizeServerList();
-                    serverCount.setText("СЕРВЕРЫ · " + servers.size());
-                    status.setText("Серверов: " + servers.size() + "; пропущено: " + skipped);
-                    int selected = 0;
+                    applyServerFilter();
+                    status.setText("Серверов: " + servers.size() + "; совместимо с ядром: " +
+                            supportedCount + (result.skipped > 0 ? "; повреждённых ссылок: " + result.skipped : ""));
+                    int selected = -1;
                     for (int i = 0; i < servers.size(); i++)
-                        if (servers.get(i).link.equals(previousLink)) { selected = i; break; }
+                        if (servers.get(i).link.equals(previousLink) &&
+                                supported.contains(servers.get(i).link)) { selected = i; break; }
+                    if (selected < 0) for (int i = 0; i < servers.size(); i++)
+                        if (supported.contains(servers.get(i).link)) { selected = i; break; }
+                    if (selected < 0) selected = 0;
                     selectServer(selected);
                     refresh.setEnabled(true);
                     if (!wideLayout && !servers.isEmpty()) showMenu(false);
@@ -654,6 +987,7 @@ public final class MainActivity extends Activity {
     }
 
     @Override protected void onDestroy() {
+        if (pairingSession != null) pairingSession.close();
         worker.shutdownNow();
         super.onDestroy();
     }

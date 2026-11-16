@@ -316,17 +316,24 @@ public final class PipidastrVpnService extends VpnService implements PlatformInt
             }
         }
         if (vpnNetwork == null) return false;
-        for (String address : new String[] {"https://example.com", "https://yandex.ru"}) {
-            HttpURLConnection connection = null;
-            try {
-                connection = (HttpURLConnection) vpnNetwork.openConnection(new URL(address));
-                connection.setConnectTimeout(6000);
-                connection.setReadTimeout(6000);
-                connection.setInstanceFollowRedirects(false);
-                int response = connection.getResponseCode();
-                if (response >= 200 && response < 400) return true;
-            } catch (Exception ex) { Log.w(TAG, "VPN connectivity check failed: " + ex.getClass().getSimpleName()); }
-            finally { if (connection != null) connection.disconnect(); }
+        for (int attempt = 0; attempt < 3; attempt++) {
+            for (String address : new String[] {"https://example.com", "https://yandex.ru"}) {
+                HttpURLConnection connection = null;
+                try {
+                    connection = (HttpURLConnection) vpnNetwork.openConnection(new URL(address));
+                    connection.setConnectTimeout(6000);
+                    connection.setReadTimeout(6000);
+                    connection.setInstanceFollowRedirects(false);
+                    int response = connection.getResponseCode();
+                    if (response >= 200 && response < 400) return true;
+                    Log.w(TAG, "VPN connectivity check returned HTTP " + response);
+                } catch (Exception ex) {
+                    Log.w(TAG, "VPN connectivity check failed: " + ex.getClass().getSimpleName() +
+                            ": " + ex.getMessage());
+                } finally { if (connection != null) connection.disconnect(); }
+            }
+            try { Thread.sleep(750); }
+            catch (InterruptedException ex) { Thread.currentThread().interrupt(); return false; }
         }
         return false;
     }
