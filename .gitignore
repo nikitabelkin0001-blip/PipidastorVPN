@@ -8,6 +8,7 @@ AndroidClient/.gradle/
 AndroidClient/build/
 AndroidClient/app/build/
 AndroidClient/app/libs/libbox.aar
+AndroidClient/app/libs/libXray.aar
 AndroidClient/local.properties
 **/bin/
 **/obj/

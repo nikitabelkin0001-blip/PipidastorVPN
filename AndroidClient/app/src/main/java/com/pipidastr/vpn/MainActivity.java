@@ -226,7 +226,7 @@ public final class MainActivity extends Activity {
                 SubscriptionParser.Server server = getItem(position);
                 boolean compatible = compatibleLinks.contains(server.link);
                 item.setText(server.name + "\n" + server.host + ":" + server.port + " · " +
-                        server.protocol + (compatible ? "" : " · нужен Xray"));
+                        server.protocol + (compatible ? "" : " · не поддерживается"));
                 item.setTextSize(wide ? 14 : 15);
                 item.setTextColor(compatible ? Color.WHITE : MUTED);
                 item.setGravity(Gravity.CENTER_VERTICAL);
@@ -480,7 +480,7 @@ public final class MainActivity extends Activity {
         SubscriptionParser.Server server = servers.get(index);
         serverTitle.setText(server.name);
         String details = server.host + ":" + server.port + " · " + server.protocol;
-        if (!compatibleLinks.contains(server.link)) details += " · Этот сервер требует Xray-ядро";
+        if (!compatibleLinks.contains(server.link)) details += " · Параметры сервера не поддерживаются";
         serverDetails.setText(details);
         getPreferences(MODE_PRIVATE).edit().putString("selected_link", server.link).apply();
         adapter.notifyDataSetChanged();
@@ -494,7 +494,7 @@ public final class MainActivity extends Activity {
             SubscriptionParser.Result parsed = SubscriptionParser.parse(link);
             SubscriptionParser.Server server = parsed.servers.get(0);
             servers.add(server);
-            try { SingBoxConfig.build(server); compatibleLinks.add(server.link); }
+            try { XrayConfig.build(server); compatibleLinks.add(server.link); }
             catch (Exception ignored) { }
             applyServerFilter();
             selectServer(0);
@@ -523,9 +523,7 @@ public final class MainActivity extends Activity {
         try {
             SubscriptionParser.Result parsed = SubscriptionParser.parse(link.trim());
             SubscriptionParser.Server server = parsed.servers.get(0);
-            String config = SingBoxConfig.build(server);
-            if ((getApplicationInfo().flags & android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0)
-                io.nekohasekai.libbox.Libbox.checkConfig(config);
+            XrayConfig.build(server);
             servers.add(server);
             compatibleLinks.add(server.link);
             applyServerFilter();
@@ -1034,7 +1032,7 @@ public final class MainActivity extends Activity {
 
     private void startVpn() {
         try {
-            String config = SingBoxConfig.build(servers.get(selectedServer));
+            String config = XrayConfig.build(servers.get(selectedServer));
             String[] packages = getPreferences(MODE_PRIVATE)
                     .getStringSet("selected_apps", new HashSet<>()).toArray(new String[0]);
             Intent intent = new Intent(this, PipidastrVpnService.class)
@@ -1169,7 +1167,7 @@ public final class MainActivity extends Activity {
                 Set<String> supported = new HashSet<>();
                 int unsupported = 0;
                 for (SubscriptionParser.Server server : result.servers) {
-                    try { SingBoxConfig.build(server); supported.add(server.link); }
+                    try { XrayConfig.build(server); supported.add(server.link); }
                     catch (Exception ex) { unsupported++; }
                 }
                 if (result.servers.isEmpty()) throw new IOException("В подписке нет серверов.");
@@ -1185,7 +1183,7 @@ public final class MainActivity extends Activity {
                     serverTitle.setText("Сервер не выбран");
                     serverDetails.setText("Выберите сервер из списка");
                     applyServerFilter();
-                    status.setText("Серверов: " + servers.size() + "; совместимо с ядром: " +
+                    status.setText("Серверов: " + servers.size() + "; совместимо с Xray: " +
                             supportedCount + (result.skipped > 0 ? "; повреждённых ссылок: " + result.skipped : ""));
                     int selected = -1;
                     for (int i = 0; i < servers.size(); i++)
