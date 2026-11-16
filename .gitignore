@@ -1,5 +1,7 @@
 .dotnet/
 .dotnet-cli/
+.dotnet-home/
+.publish-ui/
 portable-build/
 .android-tools/
 AndroidClient/.gradle/

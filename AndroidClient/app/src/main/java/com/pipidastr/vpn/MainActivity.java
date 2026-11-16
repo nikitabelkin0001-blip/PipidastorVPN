@@ -2,18 +2,26 @@ package com.pipidastr.vpn;
 
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.animation.ArgbEvaluator;
+import android.animation.ValueAnimator;
 import android.content.ActivityNotFoundException;
 import android.content.BroadcastReceiver;
 import android.content.ContentValues;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.content.res.ColorStateList;
 import android.content.pm.ResolveInfo;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.Bitmap;
+import android.graphics.Canvas;
 import android.graphics.drawable.ColorDrawable;
+import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
+import android.graphics.Paint;
+import android.graphics.PixelFormat;
+import android.graphics.RectF;
 import android.net.VpnService;
 import android.net.Uri;
 import android.os.Build;
@@ -24,8 +32,10 @@ import android.text.TextWatcher;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.animation.DecelerateInterpolator;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
+import android.widget.CheckBox;
 import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.ImageButton;
@@ -108,9 +118,9 @@ public final class MainActivity extends Activity {
         root.setOrientation(LinearLayout.VERTICAL);
         root.setPadding(dp(22), dp(16), dp(22), dp(16));
         root.setBackgroundColor(BACKGROUND);
-        root.setFocusableInTouchMode(true);
+        if (!wide) root.setFocusableInTouchMode(true);
         setContentView(root);
-        root.requestFocus();
+        if (!wide) root.requestFocus();
 
         LinearLayout header = new LinearLayout(this);
         header.setGravity(Gravity.CENTER_VERTICAL);
@@ -128,7 +138,7 @@ public final class MainActivity extends Activity {
             menuButton.setContentDescription("Открыть меню");
             menuButton.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
             menuButton.setPadding(dp(11), dp(9), dp(11), dp(9));
-            menuButton.setBackground(round(FIELD));
+            menuButton.setBackground(interactive(FIELD));
             header.addView(menuButton, new LinearLayout.LayoutParams(dp(46), dp(42)));
         }
         root.addView(header);
@@ -162,7 +172,7 @@ public final class MainActivity extends Activity {
         urlInput.setTextColor(Color.WHITE);
         urlInput.setHintTextColor(MUTED);
         urlInput.setPadding(dp(12), 0, dp(12), 0);
-        urlInput.setBackground(round(FIELD));
+        urlInput.setBackground(interactive(FIELD));
         urlInput.setInputType(android.text.InputType.TYPE_CLASS_TEXT |
                 android.text.InputType.TYPE_TEXT_VARIATION_URI);
         urlInput.setText(getPreferences(MODE_PRIVATE).getString("subscription_url", ""));
@@ -175,7 +185,7 @@ public final class MainActivity extends Activity {
         scanQr.setTextSize(14);
         scanQr.setTextColor(Color.WHITE);
         scanQr.setAllCaps(false);
-        scanQr.setBackground(round(FIELD));
+        scanQr.setBackground(interactive(FIELD));
         scanQr.setOnClickListener(view -> chooseQrSource());
         LinearLayout.LayoutParams qrParams = new LinearLayout.LayoutParams(-1, dp(48));
         qrParams.topMargin = dp(10);
@@ -186,7 +196,7 @@ public final class MainActivity extends Activity {
         showQr.setTextSize(14);
         showQr.setTextColor(Color.WHITE);
         showQr.setAllCaps(false);
-        showQr.setBackground(round(FIELD));
+        showQr.setBackground(interactive(FIELD));
         showQr.setOnClickListener(view -> showPairingQr());
         LinearLayout.LayoutParams showQrParams = new LinearLayout.LayoutParams(-1, dp(48));
         showQrParams.topMargin = dp(10);
@@ -197,7 +207,7 @@ public final class MainActivity extends Activity {
         refresh.setTextSize(14);
         refresh.setTextColor(Color.WHITE);
         refresh.setAllCaps(false);
-        refresh.setBackground(round(FIELD));
+        refresh.setBackground(interactive(FIELD));
         refresh.setOnClickListener(view -> refreshServers());
         LinearLayout.LayoutParams refreshParams = new LinearLayout.LayoutParams(-1, dp(48));
         refreshParams.topMargin = dp(10);
@@ -206,6 +216,7 @@ public final class MainActivity extends Activity {
         ListView list = new ListView(this);
         serverList = list;
         list.setId(View.generateViewId());
+        if (wide) list.setFocusableInTouchMode(true);
         list.setDivider(new ColorDrawable(Color.TRANSPARENT));
         list.setDividerHeight(dp(wide ? 7 : 10));
         list.setSelector(android.R.color.transparent);
@@ -221,13 +232,27 @@ public final class MainActivity extends Activity {
                 item.setGravity(Gravity.CENTER_VERTICAL);
                 item.setMinHeight(dp(wide ? 58 : 76));
                 item.setPadding(dp(14), dp(wide ? 7 : 12), dp(10), dp(wide ? 7 : 12));
-                item.setBackground(round(servers.indexOf(server) == selectedServer ? SELECTED : FIELD));
+                boolean active = servers.indexOf(server) == selectedServer;
+                item.setBackground(serverItemBackground(active));
+                item.setActivated(wide && list.hasFocus() && position == list.getSelectedItemPosition());
                 return item;
             }
         };
         list.setAdapter(adapter);
         list.setOnItemClickListener((parent, view, position, id) ->
                 selectServer(servers.indexOf(visibleServers.get(position))));
+        if (wide) {
+            list.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener() {
+                @Override public void onItemSelected(android.widget.AdapterView<?> parent, View view,
+                        int position, long id) {
+                    updateServerFocus(list);
+                }
+                @Override public void onNothingSelected(android.widget.AdapterView<?> parent) {
+                    updateServerFocus(list);
+                }
+            });
+            list.setOnFocusChangeListener((view, focused) -> updateServerFocus(list));
+        }
         LinearLayout.LayoutParams listParams = new LinearLayout.LayoutParams(-1, 0, 1);
         listParams.topMargin = dp(10);
         sidebar.addView(list, listParams);
@@ -259,7 +284,7 @@ public final class MainActivity extends Activity {
         connectButton.setTextSize(17);
         connectButton.setAllCaps(false);
         connectButton.setTextColor(Color.WHITE);
-        connectButton.setBackground(round(ACCENT));
+        connectButton.setBackground(interactive(ACCENT));
         connectButton.setOnClickListener(view -> toggleVpn());
         LinearLayout.LayoutParams connectParams = new LinearLayout.LayoutParams(-1, dp(wide ? 42 : 46));
         connectParams.topMargin = dp(wide ? 6 : 12);
@@ -302,7 +327,7 @@ public final class MainActivity extends Activity {
             serverSearch.setTextColor(Color.WHITE);
             serverSearch.setHintTextColor(MUTED);
             serverSearch.setPadding(dp(12), 0, dp(12), 0);
-            serverSearch.setBackground(round(FIELD));
+            serverSearch.setBackground(interactive(FIELD));
             LinearLayout.LayoutParams searchParams = new LinearLayout.LayoutParams(-1, dp(46));
             searchParams.topMargin = dp(10);
             sidebar.addView(serverSearch, searchParams);
@@ -346,11 +371,12 @@ public final class MainActivity extends Activity {
             selectedAppsSummary = text("", 15, MUTED, false);
             appsCard.addView(selectedAppsSummary);
             Button chooseApps = new Button(this);
+            chooseApps.setId(View.generateViewId());
             chooseApps.setText("Выбрать приложения");
             chooseApps.setTextSize(14);
             chooseApps.setTextColor(Color.WHITE);
             chooseApps.setAllCaps(false);
-            chooseApps.setBackground(round(FIELD));
+            chooseApps.setBackground(interactive(FIELD));
             LinearLayout.LayoutParams chooseParams = new LinearLayout.LayoutParams(-1, dp(48));
             chooseParams.topMargin = dp(10);
             appsCard.addView(chooseApps, chooseParams);
@@ -381,11 +407,12 @@ public final class MainActivity extends Activity {
             profileValue.setTextSize(18);
             profileSettings.addView(profileValue);
             Button chooseApps = new Button(this);
+            chooseApps.setId(View.generateViewId());
             chooseApps.setText("Выбрать приложения");
             chooseApps.setTextSize(14);
             chooseApps.setTextColor(Color.WHITE);
             chooseApps.setAllCaps(false);
-            chooseApps.setBackground(round(FIELD));
+            chooseApps.setBackground(interactive(FIELD));
             LinearLayout.LayoutParams chooseParams = new LinearLayout.LayoutParams(-1, dp(40));
             chooseParams.topMargin = dp(6);
             profileSettings.addView(chooseApps, chooseParams);
@@ -397,11 +424,12 @@ public final class MainActivity extends Activity {
             LinearLayout subscriptionCard = card();
             subscriptionCard.addView(text("Подписка", 18, Color.WHITE, true));
             Button addSubscription = new Button(this);
+            addSubscription.setId(View.generateViewId());
             addSubscription.setText("Добавить подписку");
             addSubscription.setTextSize(14);
             addSubscription.setTextColor(Color.WHITE);
             addSubscription.setAllCaps(false);
-            addSubscription.setBackground(round(FIELD));
+            addSubscription.setBackground(interactive(FIELD));
             LinearLayout.LayoutParams addParams = new LinearLayout.LayoutParams(-1, dp(42));
             addParams.topMargin = dp(6);
             subscriptionCard.addView(addSubscription, addParams);
@@ -409,7 +437,13 @@ public final class MainActivity extends Activity {
             status.setTextSize(13);
             infoCard.removeView(status);
             subscriptionCard.addView(status);
-            LinearLayout.LayoutParams subscriptionParams = new LinearLayout.LayoutParams(-1, -2);
+            connectButton.setNextFocusDownId(chooseApps.getId());
+            chooseApps.setNextFocusUpId(connectButton.getId());
+            chooseApps.setNextFocusDownId(addSubscription.getId());
+            addSubscription.setNextFocusUpId(chooseApps.getId());
+            chooseApps.setNextFocusLeftId(list.getId());
+            addSubscription.setNextFocusLeftId(list.getId());
+            LinearLayout.LayoutParams subscriptionParams = new LinearLayout.LayoutParams(-1, 0, 1);
             subscriptionParams.topMargin = dp(10);
             detailsColumn.addView(subscriptionCard, subscriptionParams);
 
@@ -422,6 +456,7 @@ public final class MainActivity extends Activity {
         handleIncomingIntent(incoming);
         if (urlInput.length() > 0 &&
                 (incoming == null || !Intent.ACTION_SEND.equals(incoming.getAction()))) refreshServers();
+        if (wide) list.post(list::requestFocus);
     }
 
     @Override protected void onNewIntent(Intent intent) {
@@ -541,6 +576,108 @@ public final class MainActivity extends Activity {
         return shape;
     }
 
+    private Drawable interactive(int base) {
+        int bright = base == ACCENT ? Color.rgb(151, 145, 255) : Color.rgb(61, 78, 119);
+        return new AnimatedHighlightDrawable(base, bright, bright);
+    }
+
+    private Drawable serverItemBackground(boolean active) {
+        return new AnimatedHighlightDrawable(active ? SELECTED : FIELD,
+                SELECTED, Color.rgb(61, 78, 119));
+    }
+
+    private final class AnimatedHighlightDrawable extends Drawable {
+        private final int base;
+        private final int focused;
+        private final int hovered;
+        private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final ArgbEvaluator colors = new ArgbEvaluator();
+        private int fill;
+        private int border = Color.argb(0, 255, 255, 255);
+        private int opacity = 255;
+        private boolean initialized;
+        private ValueAnimator transition;
+
+        AnimatedHighlightDrawable(int base, int focused, int hovered) {
+            this.base = base;
+            this.focused = focused;
+            this.hovered = hovered;
+            this.fill = base;
+        }
+
+        @Override public boolean isStateful() { return true; }
+
+        @Override protected boolean onStateChange(int[] state) {
+            boolean strong = hasState(state, android.R.attr.state_pressed) ||
+                    hasState(state, android.R.attr.state_focused) ||
+                    hasState(state, android.R.attr.state_activated) ||
+                    hasState(state, android.R.attr.state_selected);
+            boolean hover = !strong && hasState(state, android.R.attr.state_hovered);
+            int targetFill = strong ? focused : hover ? hovered : base;
+            int targetBorder = strong ? Color.WHITE : hover ? ACCENT :
+                    Color.argb(0, 255, 255, 255);
+            if (transition != null) transition.cancel();
+            if (!initialized) {
+                initialized = true;
+                fill = targetFill;
+                border = targetBorder;
+                invalidateSelf();
+                return true;
+            }
+            if (fill == targetFill && border == targetBorder) return false;
+            int fromFill = fill;
+            int fromBorder = border;
+            transition = ValueAnimator.ofFloat(0f, 1f);
+            transition.setDuration(220);
+            transition.setInterpolator(new DecelerateInterpolator());
+            transition.addUpdateListener(animation -> {
+                float progress = (float) animation.getAnimatedValue();
+                fill = (int) colors.evaluate(progress, fromFill, targetFill);
+                border = (int) colors.evaluate(progress, fromBorder, targetBorder);
+                invalidateSelf();
+            });
+            transition.start();
+            return true;
+        }
+
+        private boolean hasState(int[] states, int wanted) {
+            for (int state : states) if (state == wanted) return true;
+            return false;
+        }
+
+        @Override public void draw(Canvas canvas) {
+            float inset = dp(1);
+            RectF bounds = new RectF(getBounds().left + inset, getBounds().top + inset,
+                    getBounds().right - inset, getBounds().bottom - inset);
+            float radius = dp(16);
+            paint.setStyle(Paint.Style.FILL);
+            paint.setColor(fill);
+            paint.setAlpha(Color.alpha(fill) * opacity / 255);
+            canvas.drawRoundRect(bounds, radius, radius, paint);
+            if (Color.alpha(border) > 0) {
+                paint.setStyle(Paint.Style.STROKE);
+                paint.setStrokeWidth(dp(2));
+                paint.setColor(border);
+                paint.setAlpha(Color.alpha(border) * opacity / 255);
+                canvas.drawRoundRect(bounds, radius, radius, paint);
+            }
+        }
+
+        @Override public void setAlpha(int value) { opacity = value; invalidateSelf(); }
+        @Override public void setColorFilter(android.graphics.ColorFilter filter) {
+            paint.setColorFilter(filter);
+            invalidateSelf();
+        }
+        @Override public int getOpacity() { return PixelFormat.TRANSLUCENT; }
+    }
+
+    private void updateServerFocus(ListView list) {
+        int selected = list.hasFocus() ? list.getSelectedItemPosition() : -1;
+        for (int index = 0; index < list.getChildCount(); index++) {
+            list.getChildAt(index).setActivated(list.getFirstVisiblePosition() + index == selected);
+        }
+    }
+
     private LinearLayout card() {
         LinearLayout card = new LinearLayout(this);
         card.setOrientation(LinearLayout.VERTICAL);
@@ -558,12 +695,81 @@ public final class MainActivity extends Activity {
         return view;
     }
 
+    private LinearLayout dialogPanel(String title) {
+        LinearLayout panel = new LinearLayout(this);
+        panel.setOrientation(LinearLayout.VERTICAL);
+        panel.setPadding(dp(20), dp(20), dp(20), dp(20));
+        panel.setBackground(round(CARD));
+        TextView heading = text(title, wideLayout ? 21 : 19, Color.WHITE, true);
+        LinearLayout.LayoutParams headingParams = new LinearLayout.LayoutParams(-1, -2);
+        headingParams.bottomMargin = dp(16);
+        panel.addView(heading, headingParams);
+        return panel;
+    }
+
+    private Button dialogButton(String label, int color) {
+        Button button = new Button(this);
+        button.setText(label);
+        button.setTextSize(wideLayout ? 16 : 14);
+        button.setTextColor(Color.WHITE);
+        button.setAllCaps(false);
+        button.setBackground(interactive(color));
+        return button;
+    }
+
+    private LinearLayout dialogActions(LinearLayout panel) {
+        LinearLayout actions = new LinearLayout(this);
+        actions.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, -2);
+        params.topMargin = dp(16);
+        panel.addView(actions, params);
+        return actions;
+    }
+
+    private void showThemedDialog(AlertDialog dialog) {
+        dialog.show();
+        if (dialog.getWindow() != null) {
+            dialog.getWindow().setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
+            int available = getResources().getDisplayMetrics().widthPixels - dp(32);
+            dialog.getWindow().setLayout(Math.min(dp(wideLayout ? 540 : 430), available),
+                    ViewGroup.LayoutParams.WRAP_CONTENT);
+        }
+    }
+
+    private void showActionDialog(String title, String[] labels,
+            java.util.function.IntConsumer selected) {
+        LinearLayout panel = dialogPanel(title);
+        AlertDialog dialog = new AlertDialog.Builder(this).setView(panel).create();
+        for (int index = 0; index < labels.length; index++) {
+            final int choice = index;
+            Button action = dialogButton(labels[index], FIELD);
+            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, dp(50));
+            if (index > 0) params.topMargin = dp(9);
+            panel.addView(action, params);
+            action.setOnClickListener(view -> {
+                dialog.dismiss();
+                selected.accept(choice);
+            });
+        }
+        showThemedDialog(dialog);
+    }
+
     private void showMenu(boolean open) {
         if (mobileMenu == null) return;
+        mobileBody.animate().cancel();
+        mobileScroll.animate().cancel();
         mobileBody.setVisibility(open ? View.GONE : View.VISIBLE);
         mobileScroll.setVisibility(open ? View.VISIBLE : View.GONE);
+        View incoming = open ? mobileScroll : mobileBody;
+        incoming.setAlpha(0f);
+        incoming.setTranslationY(dp(open ? -18 : 18));
+        incoming.animate().alpha(1f).translationY(0f).setDuration(300)
+                .setInterpolator(new DecelerateInterpolator()).start();
         menuButton.setImageResource(open ? R.drawable.ic_back : R.drawable.ic_menu);
         menuButton.setContentDescription(open ? "Закрыть настройки" : "Открыть настройки");
+        menuButton.animate().cancel();
+        menuButton.animate().rotation(open ? 90f : 0f).setDuration(300)
+                .setInterpolator(new DecelerateInterpolator()).start();
         if (mobileScroll != null) mobileScroll.scrollTo(0, 0);
     }
 
@@ -630,23 +836,21 @@ public final class MainActivity extends Activity {
         boolean camera = getPackageManager().hasSystemFeature(android.content.pm.PackageManager.FEATURE_CAMERA_ANY);
         String[] choices = camera ? new String[] {"Сфотографировать QR", "Выбрать изображение"}
                 : new String[] {"Выбрать изображение"};
-        new AlertDialog.Builder(this).setTitle("Добавить подписку по QR-коду")
-                .setItems(choices, (dialog, index) -> {
-                    if (camera && index == 0) captureQrImage();
-                    else pickQrImage();
-                }).show();
+        showActionDialog("Добавить по QR-коду", choices, index -> {
+            if (camera && index == 0) captureQrImage();
+            else pickQrImage();
+        });
     }
 
     private void showSubscriptionActions() {
         String[] actions = {"Ввести ссылку", "Добавить по QR-коду",
                 "Получить с телефона по QR", "Обновить серверы"};
-        new AlertDialog.Builder(this).setTitle("Добавить подписку")
-                .setItems(actions, (dialog, index) -> {
-                    if (index == 0) showManualSubscriptionDialog();
-                    else if (index == 1) chooseQrSource();
-                    else if (index == 2) showPairingQr();
-                    else refreshServers();
-                }).show();
+        showActionDialog("Добавить подписку", actions, index -> {
+            if (index == 0) showManualSubscriptionDialog();
+            else if (index == 1) chooseQrSource();
+            else if (index == 2) showPairingQr();
+            else refreshServers();
+        });
     }
 
     private void showManualSubscriptionDialog() {
@@ -656,18 +860,32 @@ public final class MainActivity extends Activity {
         input.setInputType(android.text.InputType.TYPE_CLASS_TEXT |
                 android.text.InputType.TYPE_TEXT_VARIATION_URI);
         input.setText(urlInput.getText());
-        new AlertDialog.Builder(this).setTitle("Ссылка на подписку")
-                .setView(input)
-                .setNegativeButton("Отмена", null)
-                .setPositiveButton("Сохранить", (dialog, which) -> {
+        input.setTextColor(Color.WHITE);
+        input.setHintTextColor(MUTED);
+        input.setPadding(dp(12), 0, dp(12), 0);
+        input.setBackground(interactive(FIELD));
+        LinearLayout panel = dialogPanel("Ссылка на подписку");
+        panel.addView(input, new LinearLayout.LayoutParams(-1, dp(52)));
+        LinearLayout actions = dialogActions(panel);
+        AlertDialog dialog = new AlertDialog.Builder(this).setView(panel).create();
+        Button cancel = dialogButton("Отмена", FIELD);
+        cancel.setOnClickListener(view -> dialog.dismiss());
+        actions.addView(cancel, new LinearLayout.LayoutParams(0, dp(48), 1));
+        Button save = dialogButton("Сохранить", ACCENT);
+        LinearLayout.LayoutParams saveParams = new LinearLayout.LayoutParams(0, dp(48), 1);
+        saveParams.leftMargin = dp(10);
+        actions.addView(save, saveParams);
+        save.setOnClickListener(view -> {
                     String address = input.getText().toString().trim();
                     if (!address.startsWith("https://")) {
                         showQrError("Нужна HTTPS-ссылка на подписку.");
                         return;
                     }
+                    dialog.dismiss();
                     urlInput.setText(address);
                     refreshServers();
-                }).show();
+                });
+        showThemedDialog(dialog);
     }
 
     private void captureQrImage() {
@@ -726,8 +944,19 @@ public final class MainActivity extends Activity {
 
     private void showQrError(String message) {
         status.setText(message);
-        new AlertDialog.Builder(this).setTitle("QR-код")
-                .setMessage(message).setPositiveButton("Закрыть", null).show();
+        showMessageDialog("QR-код", message);
+    }
+
+    private void showMessageDialog(String title, String message) {
+        LinearLayout panel = dialogPanel(title);
+        panel.addView(text(message, 15, MUTED, false));
+        AlertDialog dialog = new AlertDialog.Builder(this).setView(panel).create();
+        Button close = dialogButton("Закрыть", ACCENT);
+        LinearLayout.LayoutParams closeParams = new LinearLayout.LayoutParams(-1, dp(48));
+        closeParams.topMargin = dp(16);
+        panel.addView(close, closeParams);
+        close.setOnClickListener(view -> dialog.dismiss());
+        showThemedDialog(dialog);
     }
 
     private void showPairingQr() {
@@ -744,17 +973,22 @@ public final class MainActivity extends Activity {
             FrameLayout frame = new FrameLayout(this);
             frame.setPadding(dp(12), dp(12), dp(12), dp(12));
             frame.addView(image, new FrameLayout.LayoutParams(size, size, Gravity.CENTER));
-            AlertDialog dialog = new AlertDialog.Builder(this)
-                    .setTitle("Передать подписку с телефона")
-                    .setMessage("Откройте Pipidastr VPN на телефоне и выберите «Добавить по QR-коду». Код действует 2 минуты.")
-                    .setView(frame)
-                    .setPositiveButton("Закрыть", null)
-                    .create();
+            LinearLayout panel = dialogPanel("Передать подписку с телефона");
+            TextView hint = text("Откройте Pipidastr VPN на телефоне и выберите «Добавить по QR-коду». Код действует 2 минуты.",
+                    14, MUTED, false);
+            panel.addView(hint);
+            panel.addView(frame, new LinearLayout.LayoutParams(-1, size + dp(24)));
+            AlertDialog dialog = new AlertDialog.Builder(this).setView(panel).create();
+            Button close = dialogButton("Закрыть", ACCENT);
+            LinearLayout.LayoutParams closeParams = new LinearLayout.LayoutParams(-1, dp(48));
+            closeParams.topMargin = dp(10);
+            panel.addView(close, closeParams);
+            close.setOnClickListener(view -> dialog.dismiss());
             dialog.setOnDismissListener(ignored -> {
                 if (pairingSession == session) { pairingSession = null; session.close(); }
                 bitmap.recycle();
             });
-            dialog.show();
+            showThemedDialog(dialog);
             session.waitForSubscription(url -> runOnUiThread(() -> {
                 if (pairingSession != session || isFinishing() || isDestroyed()) return;
                 pairingSession = null;
@@ -784,8 +1018,7 @@ public final class MainActivity extends Activity {
                 runOnUiThread(() -> {
                     if (isFinishing() || isDestroyed()) return;
                     status.setText("Подписка передана на телевизор.");
-                    new AlertDialog.Builder(this).setMessage("Подписка передана на телевизор.")
-                            .setPositiveButton("Закрыть", null).show();
+                    showMessageDialog("Подписка", "Подписка передана на телевизор.");
                 });
             } catch (Exception ex) {
                 runOnUiThread(() -> { if (!isFinishing() && !isDestroyed())
@@ -842,8 +1075,7 @@ public final class MainActivity extends Activity {
                 appNames.put(pkg, app.loadLabel(getPackageManager()).toString());
         }
         if (appNames.isEmpty()) {
-            new AlertDialog.Builder(this).setMessage("Установленные приложения не найдены.")
-                    .setPositiveButton("Закрыть", null).show();
+            showMessageDialog("Приложения через VPN", "Установленные приложения не найдены.");
             return;
         }
 
@@ -857,17 +1089,66 @@ public final class MainActivity extends Activity {
             labels[i] = appNames.get(pkg) + "\n" + pkg;
             checked[i] = saved.contains(pkg);
         }
-        new AlertDialog.Builder(this)
-                .setTitle("Приложения через VPN")
-                .setMultiChoiceItems(labels, checked, (dialog, index, selected) -> checked[index] = selected)
-                .setNegativeButton("Отмена", null)
-                .setPositiveButton("Сохранить", (dialog, which) -> {
-                    Set<String> selection = new HashSet<>();
-                    for (int i = 0; i < packages.size(); i++)
-                        if (checked[i]) selection.add(packages.get(i));
-                    getPreferences(MODE_PRIVATE).edit().putStringSet("selected_apps", selection).apply();
-                    updateSelectedApps();
-                }).show();
+        LinearLayout panel = dialogPanel("Приложения через VPN");
+        TextView hint = text("Отметьте приложения, которые будут использовать VPN", 14, MUTED, false);
+        LinearLayout.LayoutParams hintParams = new LinearLayout.LayoutParams(-1, -2);
+        hintParams.bottomMargin = dp(12);
+        panel.addView(hint, hintParams);
+        ScrollView scroll = new ScrollView(this);
+        scroll.setFillViewport(false);
+        LinearLayout appRows = new LinearLayout(this);
+        appRows.setOrientation(LinearLayout.VERTICAL);
+        scroll.addView(appRows);
+        int maxHeight = Math.min(dp(wideLayout ? 400 : 430),
+                getResources().getDisplayMetrics().heightPixels - dp(220));
+        panel.addView(scroll, new LinearLayout.LayoutParams(-1, Math.max(dp(120), maxHeight)));
+        for (int index = 0; index < packages.size(); index++) {
+            CheckBox option = new CheckBox(this);
+            option.setText(labels[index]);
+            Drawable icon;
+            try {
+                android.content.pm.ApplicationInfo info = getPackageManager()
+                        .getApplicationInfo(packages.get(index), 0);
+                icon = info.icon == 0 ? getDrawable(R.drawable.pipidastr_logo)
+                        : getPackageManager().getApplicationIcon(info);
+            }
+            catch (Exception ignored) { icon = getDrawable(R.drawable.pipidastr_logo); }
+            if (icon != null) {
+                icon.setBounds(0, 0, dp(32), dp(32));
+                option.setCompoundDrawables(icon, null, null, null);
+                option.setCompoundDrawablePadding(dp(12));
+            }
+            option.setTextSize(wideLayout ? 15 : 13);
+            option.setTextColor(Color.WHITE);
+            option.setButtonTintList(ColorStateList.valueOf(ACCENT));
+            option.setChecked(checked[index]);
+            option.setPadding(dp(12), dp(9), dp(12), dp(9));
+            option.setMinHeight(dp(58));
+            option.setBackground(interactive(FIELD));
+            final int choice = index;
+            option.setOnCheckedChangeListener((view, selected) -> checked[choice] = selected);
+            LinearLayout.LayoutParams rowParams = new LinearLayout.LayoutParams(-1, -2);
+            rowParams.bottomMargin = dp(7);
+            appRows.addView(option, rowParams);
+        }
+        LinearLayout actions = dialogActions(panel);
+        AlertDialog dialog = new AlertDialog.Builder(this).setView(panel).create();
+        Button cancel = dialogButton("Отмена", FIELD);
+        cancel.setOnClickListener(view -> dialog.dismiss());
+        actions.addView(cancel, new LinearLayout.LayoutParams(0, dp(48), 1));
+        Button save = dialogButton("Сохранить", ACCENT);
+        LinearLayout.LayoutParams saveParams = new LinearLayout.LayoutParams(0, dp(48), 1);
+        saveParams.leftMargin = dp(10);
+        actions.addView(save, saveParams);
+        save.setOnClickListener(view -> {
+            Set<String> selection = new HashSet<>();
+            for (int i = 0; i < packages.size(); i++)
+                if (checked[i]) selection.add(packages.get(i));
+            getPreferences(MODE_PRIVATE).edit().putStringSet("selected_apps", selection).apply();
+            updateSelectedApps();
+            dialog.dismiss();
+        });
+        showThemedDialog(dialog);
     }
 
     private void refreshServers() {

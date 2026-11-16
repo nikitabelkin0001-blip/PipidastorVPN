@@ -7,7 +7,31 @@
     <SolidColorBrush x:Key="Accent" Color="#7C7CFF"/>
     <Style TargetType="Window"><Setter Property="Background" Value="{StaticResource Page}"/><Setter Property="Foreground" Value="#F4F6FF"/><Setter Property="FontFamily" Value="Segoe UI"/></Style>
     <Style TargetType="Button">
-      <Setter Property="Background" Value="#293650"/><Setter Property="Foreground" Value="White"/><Setter Property="BorderThickness" Value="0"/><Setter Property="Padding" Value="14,9"/><Setter Property="Cursor" Value="Hand"/><Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button"><Border Background="{TemplateBinding Background}" CornerRadius="9" Padding="{TemplateBinding Padding}"><ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/></Border></ControlTemplate></Setter.Value></Setter>
+      <Setter Property="Background" Value="#293650"/><Setter Property="Foreground" Value="White"/><Setter Property="BorderThickness" Value="2"/><Setter Property="Padding" Value="14,9"/><Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button">
+        <Grid x:Name="ButtonRoot">
+          <Border Background="{TemplateBinding Background}" CornerRadius="9"/>
+          <Border x:Name="HoverSurface" Background="#514EA0" BorderBrush="#B8B5FF" BorderThickness="2" CornerRadius="9" Opacity="0" IsHitTestVisible="False"/>
+          <Border x:Name="FocusSurface" BorderBrush="White" BorderThickness="2" CornerRadius="9" Opacity="0" IsHitTestVisible="False"/>
+          <Border x:Name="PressedSurface" Background="#6963DA" BorderBrush="White" BorderThickness="2" CornerRadius="9" Opacity="0" IsHitTestVisible="False"/>
+          <ContentPresenter Margin="{TemplateBinding Padding}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+        </Grid>
+        <ControlTemplate.Triggers>
+          <Trigger Property="IsMouseOver" Value="True">
+            <Trigger.EnterActions><BeginStoryboard><Storyboard><DoubleAnimation Storyboard.TargetName="HoverSurface" Storyboard.TargetProperty="Opacity" To="1" Duration="0:0:0.2"/></Storyboard></BeginStoryboard></Trigger.EnterActions>
+            <Trigger.ExitActions><BeginStoryboard><Storyboard><DoubleAnimation Storyboard.TargetName="HoverSurface" Storyboard.TargetProperty="Opacity" To="0" Duration="0:0:0.2"/></Storyboard></BeginStoryboard></Trigger.ExitActions>
+          </Trigger>
+          <Trigger Property="IsKeyboardFocused" Value="True">
+            <Trigger.EnterActions><BeginStoryboard><Storyboard><DoubleAnimation Storyboard.TargetName="FocusSurface" Storyboard.TargetProperty="Opacity" To="1" Duration="0:0:0.2"/></Storyboard></BeginStoryboard></Trigger.EnterActions>
+            <Trigger.ExitActions><BeginStoryboard><Storyboard><DoubleAnimation Storyboard.TargetName="FocusSurface" Storyboard.TargetProperty="Opacity" To="0" Duration="0:0:0.2"/></Storyboard></BeginStoryboard></Trigger.ExitActions>
+          </Trigger>
+          <Trigger Property="IsPressed" Value="True">
+            <Trigger.EnterActions><BeginStoryboard><Storyboard><DoubleAnimation Storyboard.TargetName="PressedSurface" Storyboard.TargetProperty="Opacity" To="1" Duration="0:0:0.12"/></Storyboard></BeginStoryboard></Trigger.EnterActions>
+            <Trigger.ExitActions><BeginStoryboard><Storyboard><DoubleAnimation Storyboard.TargetName="PressedSurface" Storyboard.TargetProperty="Opacity" To="0" Duration="0:0:0.2"/></Storyboard></BeginStoryboard></Trigger.ExitActions>
+          </Trigger>
+          <Trigger Property="IsEnabled" Value="False"><Setter TargetName="ButtonRoot" Property="Opacity" Value="0.55"/></Trigger>
+        </ControlTemplate.Triggers>
+      </ControlTemplate></Setter.Value></Setter>
     </Style>
     <Style TargetType="TextBox"><Setter Property="Background" Value="#0F1729"/><Setter Property="Foreground" Value="White"/><Setter Property="BorderBrush" Value="{StaticResource BorderColor}"/><Setter Property="Padding" Value="10,8"/><Setter Property="CaretBrush" Value="White"/></Style>
     <Style TargetType="ComboBox">
@@ -24,8 +48,27 @@
     <Style TargetType="ComboBoxItem"><Setter Property="Foreground" Value="White"/><Setter Property="Background" Value="Transparent"/><Setter Property="Padding" Value="10,7"/><Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ComboBoxItem"><Border x:Name="ItemSurface" Background="{TemplateBinding Background}" Padding="{TemplateBinding Padding}"><ContentPresenter/></Border><ControlTemplate.Triggers><Trigger Property="IsSelected" Value="True"><Setter TargetName="ItemSurface" Property="Background" Value="#394A78"/></Trigger><Trigger Property="IsMouseOver" Value="True"><Setter TargetName="ItemSurface" Property="Background" Value="#293A5B"/></Trigger></ControlTemplate.Triggers></ControlTemplate></Setter.Value></Setter></Style>
     <Style TargetType="ListBox"><Setter Property="Background" Value="Transparent"/><Setter Property="Foreground" Value="White"/><Setter Property="BorderThickness" Value="0"/></Style>
     <Style TargetType="ListBoxItem">
-      <Setter Property="Foreground" Value="White"/><Setter Property="Background" Value="Transparent"/><Setter Property="Padding" Value="10,9"/><Setter Property="Margin" Value="0,3"/>
-      <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ListBoxItem"><Border Background="{TemplateBinding Background}" CornerRadius="10" Padding="{TemplateBinding Padding}"><ContentPresenter/></Border><ControlTemplate.Triggers><Trigger Property="IsSelected" Value="True"><Setter Property="Background" Value="#394A78"/></Trigger><Trigger Property="IsMouseOver" Value="True"><Setter Property="Background" Value="#293A5B"/></Trigger></ControlTemplate.Triggers></ControlTemplate></Setter.Value></Setter>
+      <Setter Property="Foreground" Value="White"/><Setter Property="Background" Value="Transparent"/><Setter Property="Padding" Value="10,9"/><Setter Property="Margin" Value="0,3"/><Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ListBoxItem"><Grid>
+        <Border Background="{TemplateBinding Background}" CornerRadius="10"/>
+        <Border x:Name="SelectedSurface" Background="#394A78" BorderBrush="#757BDE" BorderThickness="2" CornerRadius="10" Opacity="0" IsHitTestVisible="False"/>
+        <Border x:Name="HoverSurface" Background="#425983" BorderBrush="#B8B5FF" BorderThickness="2" CornerRadius="10" Opacity="0" IsHitTestVisible="False"/>
+        <Border x:Name="FocusSurface" BorderBrush="White" BorderThickness="2" CornerRadius="10" Opacity="0" IsHitTestVisible="False"/>
+        <ContentPresenter Margin="{TemplateBinding Padding}"/>
+      </Grid><ControlTemplate.Triggers>
+        <Trigger Property="IsSelected" Value="True">
+          <Trigger.EnterActions><BeginStoryboard><Storyboard><DoubleAnimation Storyboard.TargetName="SelectedSurface" Storyboard.TargetProperty="Opacity" To="1" Duration="0:0:0.2"/></Storyboard></BeginStoryboard></Trigger.EnterActions>
+          <Trigger.ExitActions><BeginStoryboard><Storyboard><DoubleAnimation Storyboard.TargetName="SelectedSurface" Storyboard.TargetProperty="Opacity" To="0" Duration="0:0:0.2"/></Storyboard></BeginStoryboard></Trigger.ExitActions>
+        </Trigger>
+        <Trigger Property="IsMouseOver" Value="True">
+          <Trigger.EnterActions><BeginStoryboard><Storyboard><DoubleAnimation Storyboard.TargetName="HoverSurface" Storyboard.TargetProperty="Opacity" To="1" Duration="0:0:0.2"/></Storyboard></BeginStoryboard></Trigger.EnterActions>
+          <Trigger.ExitActions><BeginStoryboard><Storyboard><DoubleAnimation Storyboard.TargetName="HoverSurface" Storyboard.TargetProperty="Opacity" To="0" Duration="0:0:0.2"/></Storyboard></BeginStoryboard></Trigger.ExitActions>
+        </Trigger>
+        <Trigger Property="IsKeyboardFocusWithin" Value="True">
+          <Trigger.EnterActions><BeginStoryboard><Storyboard><DoubleAnimation Storyboard.TargetName="FocusSurface" Storyboard.TargetProperty="Opacity" To="1" Duration="0:0:0.2"/></Storyboard></BeginStoryboard></Trigger.EnterActions>
+          <Trigger.ExitActions><BeginStoryboard><Storyboard><DoubleAnimation Storyboard.TargetName="FocusSurface" Storyboard.TargetProperty="Opacity" To="0" Duration="0:0:0.2"/></Storyboard></BeginStoryboard></Trigger.ExitActions>
+        </Trigger>
+      </ControlTemplate.Triggers></ControlTemplate></Setter.Value></Setter>
     </Style>
     <DataTemplate x:Key="AppItemTemplate">
       <Grid Margin="0,2"><Grid.ColumnDefinitions><ColumnDefinition Width="42"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
