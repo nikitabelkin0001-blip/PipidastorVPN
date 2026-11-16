@@ -1,0 +1,98 @@
+diff --git a/DynamicIsland.csproj b/DynamicIsland.csproj
+index 6d5bda6..145b84b 100644
+--- a/DynamicIsland.csproj
++++ b/DynamicIsland.csproj
+@@ -2,7 +2,7 @@
+ 
+   <PropertyGroup>
+     <OutputType>WinExe</OutputType>
+-    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
++    <TargetFramework>net9.0-windows10.0.19041.0</TargetFramework>
+     <SupportedOSPlatformVersion>10.0.19041.0</SupportedOSPlatformVersion>
+     <UseWPF>true</UseWPF>
+     <UseWindowsForms>true</UseWindowsForms>
+diff --git a/MainWindow.Control.cs b/MainWindow.Control.cs
+index 2618518..04308b5 100644
+--- a/MainWindow.Control.cs
++++ b/MainWindow.Control.cs
+@@ -78,8 +78,36 @@ public partial class MainWindow
+         stack.Children.Add(circle);
+         stack.Children.Add(name);
+         stack.Children.Add(sub);
+-        circle.MouseLeftButtonUp += async (_, _) =>
++        DispatcherTimer? holdTimer = null;
++        var heldVpn = false;
++        if (id == "vpn")
+         {
++            circle.MouseLeftButtonDown += (_, _) =>
++            {
++                heldVpn = false;
++                holdTimer?.Stop();
++                holdTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(650) };
++                holdTimer.Tick += async (_, _) =>
++                {
++                    holdTimer.Stop();
++                    if (Settings.ReadOnly || Mouse.LeftButton != MouseButtonState.Pressed || !circle.IsMouseOver)
++                        return;
++                    heldVpn = true;
++                    try
++                    {
++                        if (await Task.Run(ControlCenter.VpnApp) is { } app)
++                            ControlCenter.OpenVpnAppWindow(app.Path);
++                    }
++                    catch (Exception ex) { Log.Write($"control vpn hold: {ex.Message}"); }
++                };
++                holdTimer.Start();
++            };
++            circle.MouseLeave += (_, _) => holdTimer?.Stop();
++        }
++        circle.MouseLeftButtonUp += async (_, e) =>
++        {
++            holdTimer?.Stop();
++            if (heldVpn) { heldVpn = false; e.Handled = true; return; }
+             if (_controlBusy) return;
+             _controlBusy = true;
+             Squeeze(circle);
+@@ -91,7 +119,7 @@ public partial class MainWindow
+                 return;
+             }
+             try { await click(); }
+-            catch (Exception e) { Log.Write($"control {id}: {e.Message}"); }
++            catch (Exception ex) { Log.Write($"control {id}: {ex.Message}"); }
+             finally { _controlBusy = false; }
+             await RefreshControlsAsync();
+         };
+diff --git a/Services/ControlCenter.cs b/Services/ControlCenter.cs
+index 6e6d609..e3e9d36 100644
+--- a/Services/ControlCenter.cs
++++ b/Services/ControlCenter.cs
+@@ -132,7 +132,7 @@ public static class ControlCenter
+     /// <summary>Windows' own VPN page (for adding a profile or for third-party VPN apps).</summary>
+     // VPN apps that don't create a Windows VPN profile (proxy / TUN clients): the tile opens them instead
+     private static readonly string[] VpnApps =
+-        ["Happ", "Hiddify", "v2rayN", "AmneziaVPN", "Amnezia", "Outline", "WireGuard", "NekoRay", "Nekobox", "Throne",
++        ["PipidastrVPN", "Happ", "Hiddify", "v2rayN", "AmneziaVPN", "Amnezia", "Outline", "WireGuard", "NekoRay", "Nekobox", "Throne",
+          "Clash Verge", "Karing", "Streisand", "Proton VPN", "Windscribe", "Mullvad VPN", "Cloudflare WARP"];
+     private static (string Name, string Path)? _vpnApp;
+     private static DateTime _vpnAppAt;
+@@ -164,6 +164,20 @@ public static class ControlCenter
+ 
+     public static void OpenVpnApp(string path) => Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });
+ 
++    public static void OpenVpnAppWindow(string shortcutPath)
++    {
++        // The quick tile discovers a Start-menu shortcut. Resolve its target so
++        // Pipidastr receives --show rather than the default toggle command.
++        var shellType = Type.GetTypeFromProgID("WScript.Shell")
++            ?? throw new InvalidOperationException("Windows shortcut service is unavailable.");
++        dynamic shell = Activator.CreateInstance(shellType)!;
++        dynamic shortcut = shell.CreateShortcut(shortcutPath);
++        string target = shortcut.TargetPath;
++        if (string.IsNullOrWhiteSpace(target) || !File.Exists(target))
++            throw new FileNotFoundException("VPN shortcut target was not found.");
++        Process.Start(new ProcessStartInfo(target, "--show") { UseShellExecute = true });
++    }
++
+     public static void OpenVpnSettings() => Process.Start(new ProcessStartInfo("ms-settings:network-vpn") { UseShellExecute = true });
+ 
+     // ------------------------------------------------------------------ power
