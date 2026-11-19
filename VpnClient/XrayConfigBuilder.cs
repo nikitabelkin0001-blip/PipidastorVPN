@@ -16,7 +16,7 @@ public static class XrayConfigBuilder
                 network = node.Transport, security = node.Security,
                 grpcSettings = node.Transport == "grpc" ? new { serviceName = node.ServiceName } : null,
                 realitySettings = node.Security == "reality" ? new { serverName = node.Sni, fingerprint = node.Fingerprint, publicKey = node.PublicKey, shortId = node.ShortId, spiderX = "/" } : null,
-                tlsSettings = node.Security == "tls" ? new { serverName = node.Sni, fingerprint = node.Fingerprint, alpn = node.Alpn, pinnedPeerCertSha256 = node.PinnedCertSha256 } : null,
+                tlsSettings = node.Security == "tls" ? new { serverName = node.Sni, fingerprint = node.Fingerprint, alpn = node.Alpn, pinnedPeerCertSha256 = node.PinnedCertSha256, verifyPeerCertByName = node.VerifyPeerCertByName } : null,
                 finalmask = node.FinalMask
             }
         };

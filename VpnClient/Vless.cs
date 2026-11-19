@@ -3,7 +3,7 @@ using System.Text.Json;
 
 namespace VpnClient;
 
-public sealed record VlessNode(string Name, string Host, int Port, Guid Id, string Sni, string PublicKey, string ShortId, string Flow, string Fingerprint, string Security, string[] Alpn, string Transport, string ServiceName, string Encryption, JsonElement? FinalMask, string? PinnedCertSha256);
+public sealed record VlessNode(string Name, string Host, int Port, Guid Id, string Sni, string PublicKey, string ShortId, string Flow, string Fingerprint, string Security, string[] Alpn, string Transport, string ServiceName, string Encryption, JsonElement? FinalMask, string? PinnedCertSha256, string? VerifyPeerCertByName = null);
 public sealed record SubscriptionParseResult(List<ServerEntry> Servers, int SkippedCount, string SkipSummary);
 public sealed class DeviceIdRequiredException : FormatException
 {
@@ -55,7 +55,8 @@ public static class Vless
         }
         return new(Uri.UnescapeDataString(uri.Fragment.TrimStart('#')) is { Length: > 0 } n ? n : uri.Host,
             uri.Host, uri.Port, id, sni, Get("pbk"), sid, flow, string.IsNullOrEmpty(fp) ? "chrome" : fp, security, alpn, transport, Get("serviceName"), string.IsNullOrEmpty(encryption) ? "none" : encryption, finalMask,
-            string.IsNullOrEmpty(Get("pcs")) ? null : Get("pcs"));
+            string.IsNullOrEmpty(Get("pcs")) ? null : Get("pcs"),
+            string.IsNullOrEmpty(Get("vcn")) ? null : Get("vcn"));
     }
 
     public static List<ServerEntry> ParseSubscription(string body)
