@@ -51,6 +51,9 @@ public sealed class TunnelService : IDisposable
         while (httpPort == socksPort) httpPort = FreePort();
         var hysteriaNode = hysteria ? Hysteria.Parse(server.Link) : null;
         var vlessNode = hysteria ? null : Vless.Parse(server.Link);
+        var bootstrapEntry = profile.Servers.FirstOrDefault(entry => entry.Name == profile.BootstrapServerName && entry.Link != server.Link);
+        var bootstrapNode = bootstrapEntry?.Link.StartsWith("vless://", StringComparison.OrdinalIgnoreCase) == true
+            ? Vless.Parse(bootstrapEntry.Link) : null;
         var serverHost = hysteriaNode?.Host ?? vlessNode!.Host;
         var transportConfig = hysteriaNode != null
             ? XrayConfigBuilder.Build(hysteriaNode, socksPort, httpPort)
@@ -62,19 +65,34 @@ public sealed class TunnelService : IDisposable
             .Select(address => address.ToString()).ToArray();
         if (serverIpv4Addresses.Length == 0)
             throw new IOException("У VPN-сервера нет доступного IPv4-адреса.");
+        IPAddress[] bootstrapAddresses = bootstrapNode == null ? [] : IPAddress.TryParse(bootstrapNode.Host, out var bootstrapIp)
+            ? new[] { bootstrapIp } : await Dns.GetHostAddressesAsync(bootstrapNode.Host);
+        var bootstrapIpv4Addresses = bootstrapAddresses.Where(address => address.AddressFamily == AddressFamily.InterNetwork)
+            .Select(address => address.ToString()).ToArray();
         xrayConfig = Path.Combine(Path.GetTempPath(), "pipidastr-xray-" + Guid.NewGuid().ToString("N") + ".json");
         singConfig = Path.Combine(Path.GetTempPath(), "pipidastr-tun-" + Guid.NewGuid().ToString("N") + ".json");
         starting = true;
         try
         {
             await ConfigFile.WriteAsync(xrayConfig, transportConfig);
-            await ConfigFile.WriteAsync(singConfig, ConfigBuilder.Build(profile, socksPort, serverIpv4Addresses));
+            await ConfigFile.WriteAsync(singConfig, ConfigBuilder.Build(profile, socksPort, serverIpv4Addresses.Concat(bootstrapIpv4Addresses)));
             await CheckAsync(xrayBinary, "run", "-test", "-config", xrayConfig);
             await CheckAsync(singBinary, "check", "-c", singConfig);
 
             xray = StartEngine(xrayBinary, "Xray", "run", "-config", xrayConfig);
             await WaitForPortAsync(httpPort);
-            EgressIp = await ProbeProxyWithRetryAsync(httpPort);
+            try { EgressIp = await (bootstrapNode == null ? ProbeProxyWithRetryAsync(httpPort) : ProbeProxyAsync(httpPort)); }
+            catch (IOException) when (bootstrapNode != null && vlessNode != null)
+            {
+                Log?.Invoke($"Прямое соединение не ответило. Подключаюсь через «{bootstrapEntry!.Name}»…");
+                Kill(xray);
+                xray = null;
+                await ConfigFile.WriteAsync(xrayConfig, XrayConfigBuilder.Build(vlessNode, socksPort, httpPort, bootstrapNode));
+                await CheckAsync(xrayBinary, "run", "-test", "-config", xrayConfig);
+                xray = StartEngine(xrayBinary, "Xray", "run", "-config", xrayConfig);
+                await WaitForPortAsync(httpPort);
+                EgressIp = await ProbeProxyWithRetryAsync(httpPort);
+            }
             Log?.Invoke("VPN-сервер ответил. Включаю системный туннель…");
 
             for (var attempt = 1; attempt <= 3; attempt++)

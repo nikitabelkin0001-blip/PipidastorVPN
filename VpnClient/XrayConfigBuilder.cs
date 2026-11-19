@@ -5,11 +5,19 @@ namespace VpnClient;
 
 public static class XrayConfigBuilder
 {
-    public static string Build(VlessNode node, int socksPort, int httpPort)
+    public static string Build(VlessNode node, int socksPort, int httpPort, VlessNode? bootstrap = null)
+    {
+        var outbounds = bootstrap == null
+            ? new object[] { CreateVlessOutbound(node, "vpn", null) }
+            : new object[] { CreateVlessOutbound(node, "vpn", "bootstrap"), CreateVlessOutbound(bootstrap, "bootstrap", null) };
+        return BuildCore(outbounds, socksPort, httpPort);
+    }
+
+    private static object CreateVlessOutbound(VlessNode node, string tag, string? dialerProxy)
     {
         var outbound = new
         {
-            tag = "vpn", protocol = "vless",
+            tag, protocol = "vless",
             settings = new { vnext = new[] { new { address = node.Host, port = node.Port, users = new[] { new { id = node.Id.ToString(), encryption = node.Encryption, flow = node.Flow } } } } },
             streamSettings = new
             {
@@ -17,10 +25,11 @@ public static class XrayConfigBuilder
                 grpcSettings = node.Transport == "grpc" ? new { serviceName = node.ServiceName } : null,
                 realitySettings = node.Security == "reality" ? new { serverName = node.Sni, fingerprint = node.Fingerprint, publicKey = node.PublicKey, shortId = node.ShortId, spiderX = "/" } : null,
                 tlsSettings = node.Security == "tls" ? new { serverName = node.Sni, fingerprint = node.Fingerprint, alpn = node.Alpn, pinnedPeerCertSha256 = node.PinnedCertSha256, verifyPeerCertByName = node.VerifyPeerCertByName } : null,
-                finalmask = node.FinalMask
+                finalmask = node.FinalMask,
+                sockopt = dialerProxy == null ? null : new { dialerProxy }
             }
         };
-        return BuildCore(outbound, socksPort, httpPort);
+        return outbound;
     }
 
     public static string Build(HysteriaNode node, int socksPort, int httpPort)
@@ -37,10 +46,10 @@ public static class XrayConfigBuilder
                 finalmask = node.FinalMask
             }
         };
-        return BuildCore(outbound, socksPort, httpPort);
+        return BuildCore([outbound], socksPort, httpPort);
     }
 
-    private static string BuildCore(object outbound, int socksPort, int httpPort)
+    private static string BuildCore(object[] outbounds, int socksPort, int httpPort)
     {
         if (socksPort is < 1 or > 65535 || httpPort is < 1 or > 65535 || socksPort == httpPort)
             throw new ArgumentOutOfRangeException(nameof(socksPort));
@@ -53,7 +62,7 @@ public static class XrayConfigBuilder
                 new { tag = "local-socks", listen = "127.0.0.1", port = socksPort, protocol = "socks", settings = new { udp = true } },
                 new { tag = "health-check", listen = "127.0.0.1", port = httpPort, protocol = "http", settings = new { } }
             },
-            outbounds = new[] { outbound }
+            outbounds
         };
         return JsonSerializer.Serialize(config, new JsonSerializerOptions { WriteIndented = true, DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull });
     }

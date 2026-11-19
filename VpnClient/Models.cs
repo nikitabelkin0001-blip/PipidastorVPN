@@ -27,6 +27,7 @@ public sealed class ConnectionProfile
     public string? SubscriptionHwid { get; set; }
     public bool SubscriptionNeedsDeviceId { get; set; }
     public int SelectedServer { get; set; }
+    public string? BootstrapServerName { get; set; }
     public bool LastSelected { get; set; }
     public override string ToString() => Name;
 }
