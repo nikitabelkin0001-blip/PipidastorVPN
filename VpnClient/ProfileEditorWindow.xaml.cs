@@ -23,7 +23,7 @@ public partial class ProfileEditorWindow : Window
             RoutingVersion = source.RoutingVersion,
             Servers = [.. source.Servers], SubscriptionUrl = source.SubscriptionUrl,
             SubscriptionHwid = source.SubscriptionHwid, SubscriptionNeedsDeviceId = source.SubscriptionNeedsDeviceId,
-            SelectedServer = source.SelectedServer
+            SelectedServer = source.SelectedServer, BootstrapServerName = source.BootstrapServerName
         };
         Heading.Text = source == null ? "Новый профиль" : "Настроить профиль";
         DeleteButton.Visibility = source == null || !allowDelete ? Visibility.Collapsed : Visibility.Visible;
