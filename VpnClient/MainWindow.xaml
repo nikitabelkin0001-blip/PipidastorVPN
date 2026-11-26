@@ -16,7 +16,13 @@
             <TextBlock Grid.Column="1" x:Name="ServerCountText" Foreground="{StaticResource Muted}" FontSize="11" Text="0"/>
           </Grid>
           <TextBlock Text="Поиск серверов" Foreground="{StaticResource Muted}" FontSize="11" Margin="2,0,0,5"/>
-          <TextBox x:Name="ServerSearchBox" TextChanged="ServerSearchBox_TextChanged" ToolTip="Поиск по названию сервера" Margin="0,0,0,10"/>
+          <TextBox x:Name="ServerSearchBox" TextChanged="ServerSearchBox_TextChanged" ToolTip="Поиск по названию сервера" Height="30" Padding="8,4" Margin="0,0,0,6"/>
+          <Grid Margin="0,0,0,10"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+            <Button x:Name="PingButton" Content="Тест пинга" Padding="6,7" FontSize="11" Margin="0,0,4,0" Click="Ping_Click" ToolTip="Проверка задержки TCP до адреса и порта серверов. Не гарантирует работу VPN."/>
+            <Button Grid.Column="1" x:Name="RefreshSubscriptionButton" Content="Обновить подписку" Padding="6,7" FontSize="11" Margin="4,0,0,0" Click="RefreshSubscription_Click"/>
+          </Grid>
+          <Button x:Name="FindReserveButton" Content="Найти резервный сервер" Click="FindReserve_Click" Padding="6,7" FontSize="11" Margin="0,0,0,4" ToolTip="Проверить серверы через прямое соединение и выбрать рабочий резерв для текущего сервера."/>
+          <TextBlock x:Name="ReserveStatusText" Foreground="{StaticResource Muted}" FontSize="11" TextTrimming="CharacterEllipsis" Margin="2,0,2,10"/>
         </StackPanel>
         <StackPanel DockPanel.Dock="Bottom" Margin="0,8,0,0">
           <Button x:Name="AddSubscriptionButton" Content="＋  Добавить подписку" Click="AddSubscription_Click" HorizontalAlignment="Stretch"/>
@@ -24,12 +30,13 @@
         </StackPanel>
         <ListBox x:Name="ServersList" SelectionChanged="ServersList_SelectionChanged" ScrollViewer.VerticalScrollBarVisibility="Auto" ScrollViewer.HorizontalScrollBarVisibility="Disabled" HorizontalContentAlignment="Stretch">
           <ListBox.ItemTemplate><DataTemplate>
-            <Grid ToolTip="{Binding Details}"><Grid.ColumnDefinitions><ColumnDefinition Width="38"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+            <Grid ToolTip="{Binding Details}"><Grid.ColumnDefinitions><ColumnDefinition Width="38"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
               <Border Width="30" Height="30" CornerRadius="8" Background="#4D4FA8" HorizontalAlignment="Left" VerticalAlignment="Center"><TextBlock Text="◈" HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="15"/></Border>
               <StackPanel Grid.Column="1" VerticalAlignment="Center" MinWidth="0">
                 <TextBlock Text="{Binding Name}" FontSize="14" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
                 <TextBlock Text="{Binding Details}" Foreground="{StaticResource Muted}" FontSize="11" TextTrimming="CharacterEllipsis" Margin="0,3,0,0"/>
               </StackPanel>
+              <TextBlock Grid.Column="2" Text="{Binding LatencyText}" FontSize="11" Foreground="{StaticResource Muted}" Margin="6,0,0,0" VerticalAlignment="Center"/>
             </Grid>
           </DataTemplate></ListBox.ItemTemplate>
         </ListBox>

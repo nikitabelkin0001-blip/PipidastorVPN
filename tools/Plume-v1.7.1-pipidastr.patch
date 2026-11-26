@@ -1,0 +1,62 @@
+--- a/app/src/main/java/dev/plume/MainActivity.kt
++++ b/app/src/main/java/dev/plume/MainActivity.kt
+@@ -3772,19 +3772,15 @@
+         }
+     }
+ 
+-    /** Happ's exported widget action toggles the selected server without opening its UI. */
+-    private fun toggleVpn() {
+-        val cm = getSystemService(ConnectivityManager::class.java)
+-        val connected = cm.getNetworkCapabilities(cm.activeNetwork)?.hasTransport(NetworkCapabilities.TRANSPORT_VPN) == true
++    private fun toggleVpn() = openPipidastr(true)
++
++    private fun openPipidastr(toggle: Boolean) {
+         try {
+-            packageManager.getPackageInfo("su.happ.proxyutility", 0)
+-            sendBroadcast(Intent("su.happ.proxyutility.action.widget.click").setClassName(
+-                "su.happ.proxyutility", "su.happ.proxyutility.receiver.WidgetProvider"))
+-            toast(getString(if (connected) R.string.vpn_disconnecting else R.string.vpn_connecting))
+-        } catch (_: PackageManager.NameNotFoundException) {
+-            toast(getString(R.string.vpn_happ_missing))
+-        } catch (_: SecurityException) {
+-            toast(getString(R.string.vpn_connect_failed))
++            startActivity(Intent(if (toggle) "com.pipidastr.vpn.action.TOGGLE" else Intent.ACTION_MAIN)
++                .setClassName("com.pipidastr.vpn", "com.pipidastr.vpn.MainActivity")
++                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
++        } catch (_: Exception) {
++            toast("Не удалось открыть Pipidastr VPN")
+         }
+     }
+ 
+@@ -3831,7 +3827,7 @@
+         val pm = packageManager
+         fun query(category: String) = pm.queryIntentActivities(Intent(Intent.ACTION_MAIN).addCategory(category), 0)
+             .map { it.activityInfo to category }
+-        return preferTvApps(query(Intent.CATEGORY_LEANBACK_LAUNCHER), query(Intent.CATEGORY_LAUNCHER)) { it.first.packageName }
++        return preferTvApps(query(Intent.CATEGORY_LEANBACK_LAUNCHER) + query("ru.sberdevices.category.STAR_LAUNCHER"), query(Intent.CATEGORY_LAUNCHER)) { it.first.packageName }
+             .filter { (a, _) -> a.packageName != packageName && a.packageName != TV_SETTINGS }
+             .map { (a, category) ->
+                 App(
+@@ -4387,6 +4383,7 @@
+     private fun onHold(v: View) {
+         val tag = v.tag as? String
+         when {
++            v.id == R.id.vpnButton -> openPipidastr(false)
+             recentAppsOpen -> if (tag != null && v.parent?.parent === recentWindowRow) recentMenu(v, tag)
+             allApps.visibility == View.VISIBLE && tag != null -> unlock { // grid: pin to the front of the row (unhiding it)
+                 prefs.edit().putStringSet("row_hidden", rowHiddenSet() - tag).apply()
+--- a/app/src/main/AndroidManifest.xml
++++ b/app/src/main/AndroidManifest.xml
+@@ -24,7 +24,11 @@
+     <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
+ 
+     <queries>
+-        <package android:name="su.happ.proxyutility" />
++        <intent>
++            <action android:name="android.intent.action.MAIN" />
++            <category android:name="ru.sberdevices.category.STAR_LAUNCHER" />
++        </intent>
++        <package android:name="com.pipidastr.vpn" />
+         <intent>
+             <action android:name="android.intent.action.MAIN" />
+             <category android:name="android.intent.category.LEANBACK_LAUNCHER" />

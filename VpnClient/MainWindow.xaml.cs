@@ -15,6 +15,9 @@ public partial class MainWindow : Window
     private List<ConnectionProfile> profiles = [];
     private ConnectionProfile? Current => ProfilesBox.SelectedItem as ConnectionProfile;
     public bool HasConfiguredServer => Current?.Servers.Count > 0;
+    private CancellationTokenSource? pingCancellation;
+    private bool refreshingSubscription;
+    private CancellationTokenSource? reserveCancellation;
     private bool loading;
     private bool connecting;
     private bool exitRequested;
@@ -47,7 +50,7 @@ public partial class MainWindow : Window
         tray.DoubleClick += (_, _) => Dispatcher.InvokeAsync(ShowFromExternal);
         tray.Visible = true;
         Closing += OnClosing;
-        Closed += (_, _) => { tray.Visible = false; tray.Dispose(); tunnel.Dispose(); http.Dispose(); };
+        Closed += (_, _) => { pingCancellation?.Cancel(); reserveCancellation?.Cancel(); tray.Visible = false; tray.Dispose(); tunnel.Dispose(); http.Dispose(); };
     }
 
     private void RefreshProfiles(ConnectionProfile? select)
@@ -63,6 +66,8 @@ public partial class MainWindow : Window
 
     private void LoadProfile()
     {
+        pingCancellation?.Cancel();
+        reserveCancellation?.Cancel();
         loading = true;
         var profile = Current;
         if (profile != null)
@@ -75,10 +80,11 @@ public partial class MainWindow : Window
             var selectedServer = profile.Servers.Count == 0 ? null : profile.Servers[Math.Clamp(profile.SelectedServer, 0, profile.Servers.Count - 1)];
             ServersList.SelectedItem = selectedServer;
             ServerCountText.Text = profile.Servers.Count.ToString();
+            ReserveStatusText.Text = profile.BootstrapServerName is { Length: > 0 } name ? "Резерв: " + name : "Резерв не выбран";
             ProfileSummaryName.Text = profile.Name;
             ProfileSummaryMode.Text = profile.Mode == TrafficMode.FullTunnel ? "Весь трафик через VPN" : "VPN для выбранных приложений";
             AppsHeading.Text = profile.Mode == TrafficMode.FullTunnel ? "Исключения из VPN" : "Приложения через VPN";
-            ServerText.Text = selectedServer?.Name ?? "Добавьте подписку";
+            if (!tunnel.IsRunning) ServerText.Text = selectedServer?.Name ?? "Добавьте подписку";
         }
         loading = false;
     }
@@ -147,6 +153,7 @@ public partial class MainWindow : Window
     private void ServersList_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         if (loading || Current == null || ServersList.SelectedItem is not ServerEntry server) return;
+        reserveCancellation?.Cancel();
         Current.SelectedServer = Current.Servers.IndexOf(server);
         ServerText.Text = server.Name;
         Save();
@@ -161,22 +168,132 @@ public partial class MainWindow : Window
         if (string.IsNullOrWhiteSpace(input)) return;
         if (!Uri.TryCreate(input.Trim(), UriKind.Absolute, out var uri) || uri.Scheme != Uri.UriSchemeHttps)
         { ShowError("Нужна HTTPS-ссылка на подписку."); return; }
-        AddSubscriptionButton.IsEnabled = false;
+        await RefreshSubscriptionAsync(profile, uri);
+    }
+
+    private async void RefreshSubscription_Click(object sender, RoutedEventArgs e)
+    {
+        var profile = Current;
+        if (profile == null || !Uri.TryCreate(profile.SubscriptionUrl, UriKind.Absolute, out var uri) || uri.Scheme != Uri.UriSchemeHttps)
+        { ShowError("Сначала добавьте подписку в этот профиль."); return; }
+        await RefreshSubscriptionAsync(profile, uri);
+    }
+
+    private async Task RefreshSubscriptionAsync(ConnectionProfile profile, Uri uri)
+    {
+        if (refreshingSubscription) return;
+        refreshingSubscription = true;
+        AddSubscriptionButton.IsEnabled = RefreshSubscriptionButton.IsEnabled = false;
+        FooterText.Text = "Обновляю подписку…";
+        var previous = profile.Servers.ElementAtOrDefault(profile.SelectedServer);
         try
         {
             var result = await subscriptions.FetchAsync(uri, profile.SubscriptionHwid, profile.SubscriptionNeedsDeviceId);
             profile.SubscriptionUrl = uri.ToString();
             profile.SubscriptionNeedsDeviceId = result.UsedDeviceId;
             profile.Servers = result.Servers;
-            profile.SelectedServer = 0;
-            Save(); LoadProfile();
-            MessageBox.Show($"Добавлено серверов: {result.Servers.Count}." +
-                (result.SkippedCount > 0 ? $"\nПропущено: {result.SkippedCount}.\n{result.SkipSummary}" : ""),
-                "Подписка обновлена", MessageBoxButton.OK, MessageBoxImage.Information);
+            var index = previous == null ? -1 : profile.Servers.FindIndex(server => server.Link == previous.Link);
+            if (index < 0 && previous != null) index = profile.Servers.FindIndex(server => server.Name == previous.Name);
+            profile.SelectedServer = Math.Max(0, index);
+            Save();
+            if (ReferenceEquals(Current, profile)) LoadProfile();
+            FooterText.Text = $"Подписка обновлена: {result.Servers.Count} серверов." +
+                (result.SkippedCount > 0 ? $" Пропущено: {result.SkippedCount}." : "") +
+                (tunnel.IsRunning ? " Изменения подключения применятся после переподключения." : "");
         }
         catch (Exception ex) when (ex is HttpRequestException or FormatException or TaskCanceledException or InvalidDataException)
-        { ShowError(ex.Message); }
-        finally { AddSubscriptionButton.IsEnabled = true; }
+        { FooterText.Text = "Не удалось обновить подписку."; ShowError(ex.Message); }
+        finally { refreshingSubscription = false; AddSubscriptionButton.IsEnabled = RefreshSubscriptionButton.IsEnabled = true; }
+    }
+
+    private async void Ping_Click(object sender, RoutedEventArgs e)
+    {
+        if (pingCancellation != null) { pingCancellation.Cancel(); return; }
+        var servers = Current?.Servers.ToArray() ?? [];
+        if (servers.Length == 0) { ShowError("Добавьте подписку для проверки серверов."); return; }
+        using var cancellation = new CancellationTokenSource();
+        pingCancellation = cancellation;
+        PingButton.Content = "Остановить";
+        foreach (var server in servers) server.LatencyText = "…";
+        var done = 0;
+        using var slots = new SemaphoreSlim(6);
+        try
+        {
+            await Task.WhenAll(servers.Select(async server =>
+            {
+                await slots.WaitAsync(cancellation.Token);
+                try
+                {
+                    if (server.Link.StartsWith("hysteria2://", StringComparison.OrdinalIgnoreCase))
+                    { server.LatencyText = "UDP"; return; }
+                    if (!Uri.TryCreate(server.Link, UriKind.Absolute, out var uri) || uri.Port < 1)
+                    { server.LatencyText = "—"; return; }
+                    server.LatencyText = "Проверка…";
+                    var latency = await ServerLatencyProbe.MeasureAsync(uri.Host, uri.Port, cancellation.Token);
+                    server.LatencyText = latency == null ? "Недоступен" : $"{latency} мс";
+                    FooterText.Text = $"Тест пинга (TCP): {++done}/{servers.Length}.";
+                }
+                finally { slots.Release(); }
+            }));
+            FooterText.Text = $"Тест пинга завершён: {done} серверов (TCP).";
+        }
+        catch (OperationCanceledException) { FooterText.Text = "Тест пинга остановлен."; }
+        finally
+        {
+            foreach (var server in servers) if (server.LatencyText is "…" or "Проверка…") server.LatencyText = "";
+            pingCancellation = null;
+            PingButton.Content = "Тест пинга";
+        }
+    }
+
+    private async void FindReserve_Click(object sender, RoutedEventArgs e)
+    {
+        if (reserveCancellation != null) { reserveCancellation.Cancel(); return; }
+        var profile = Current;
+        var target = profile?.Servers.ElementAtOrDefault(profile.SelectedServer);
+        if (profile == null || target == null) { ShowError("Выберите основной сервер из подписки."); return; }
+        pingCancellation?.Cancel();
+        using var cancellation = new CancellationTokenSource();
+        reserveCancellation = cancellation;
+        FindReserveButton.Content = "Остановить поиск";
+        PingButton.IsEnabled = false;
+        var progress = new Progress<DiscoveryProgress>(p =>
+        {
+            if (ReferenceEquals(reserveCancellation, cancellation) && !cancellation.IsCancellationRequested)
+                ReserveStatusText.Text = $"Проверено: {p.Completed}/{p.Total} · {p.ServerName}";
+        });
+        try
+        {
+            ReserveStatusText.Text = "Ищу рабочий резерв…";
+            var result = await new BootstrapDiscovery().FindAsync(target, profile.Servers.ToArray(), profile.BootstrapServerName, progress, cancellation.Token);
+            cancellation.Token.ThrowIfCancellationRequested();
+            if (result == null)
+            {
+                ReserveStatusText.Text = "Рабочий резерв не найден";
+                FooterText.Text = "Проверенные маршруты не ответили. Прежний резерв сохранён.";
+                return;
+            }
+            profile.BootstrapServerName = result.Name;
+            Save();
+            ReserveStatusText.Text = "Резерв: " + result.Name;
+            FooterText.Text = "Рабочий резерв сохранён: " + result.Name +
+                (tunnel.IsRunning ? ". Применится после переподключения." : ". Можно подключаться.");
+        }
+        catch (OperationCanceledException)
+        {
+            if (ReferenceEquals(Current, profile)) ReserveStatusText.Text = profile.BootstrapServerName is { Length: > 0 } name ? "Резерв: " + name : "Поиск остановлен";
+        }
+        catch (Exception ex)
+        {
+            if (ReferenceEquals(Current, profile)) ReserveStatusText.Text = profile.BootstrapServerName is { Length: > 0 } name ? "Резерв: " + name : "Поиск не выполнен";
+            ShowError(ex.Message);
+        }
+        finally
+        {
+            reserveCancellation = null;
+            FindReserveButton.Content = "Найти резервный сервер";
+            PingButton.IsEnabled = true;
+        }
     }
 
     private void DeleteSubscription_Click(object sender, RoutedEventArgs e)

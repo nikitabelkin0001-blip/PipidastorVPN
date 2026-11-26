@@ -19,6 +19,8 @@ import org.json.JSONObject;
 
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.net.InetSocketAddress;
+import java.net.Socket;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -38,6 +40,8 @@ public final class PipidastrVpnService extends VpnService {
     static final String EXTRA_PACKAGES = "packages";
     static final String EXTRA_STATE = "state";
     static final String EXTRA_MESSAGE = "message";
+    static final String EXTRA_CANDIDATES = "reserve_candidates";
+    static final String EXTRA_FIND_RESERVE = "find_reserve";
     static volatile String currentState = "disconnected";
     static volatile String currentMessage = "Не подключено";
     private static final String CHANNEL = "pipidastr_vpn";
@@ -58,6 +62,7 @@ public final class PipidastrVpnService extends VpnService {
 
     @Override public int onStartCommand(Intent intent, int flags, int startId) {
         if (intent == null || ACTION_STOP.equals(intent.getAction())) {
+            closing.set(true);
             worker.execute(this::stopCore);
             return START_NOT_STICKY;
         }
@@ -69,13 +74,16 @@ public final class PipidastrVpnService extends VpnService {
             worker.execute(this::stopCore);
             return START_NOT_STICKY;
         }
-        worker.execute(() -> startCore(config, packages));
+        String[] candidates = intent.getStringArrayExtra(EXTRA_CANDIDATES);
+        boolean findReserve = intent.getBooleanExtra(EXTRA_FIND_RESERVE, false);
+        worker.execute(() -> startCore(config, packages, candidates, findReserve));
         return START_NOT_STICKY;
     }
 
-    private void startCore(String config, String[] packages) {
+    private void startCore(String config, String[] packages, String[] candidates, boolean findReserve) {
         try {
-            if (coreStarted) return;
+            if (coreStarted && !findReserve) return;
+            releaseCore();
             closing.set(false);
             updateStatus("connecting", "Подключаю сервер…");
             if (!hasUnderlyingNetwork())
@@ -85,6 +93,16 @@ public final class PipidastrVpnService extends VpnService {
                     .addAddress("172.19.0.1", 30)
                     .addRoute("0.0.0.0", 0)
                     .addDnsServer("1.1.1.1");
+            Network physicalNetwork = underlyingNetwork();
+            if (physicalNetwork != null) {
+                builder.setUnderlyingNetworks(new Network[] {physicalNetwork});
+                if (Build.VERSION.SDK_INT >= 33) {
+                    android.net.LinkProperties properties = connectivity.getLinkProperties(physicalNetwork);
+                    if (properties != null) for (android.net.LinkAddress address : properties.getLinkAddresses())
+                        if (address.getAddress() instanceof java.net.Inet4Address && address.getPrefixLength() > 0)
+                            builder.excludeRoute(new android.net.IpPrefix(address.getAddress(), address.getPrefixLength()));
+                }
+            }
             if (packages.length > 0) {
                 List<String> apps = new ArrayList<>(Arrays.asList(packages));
                 if (!apps.contains(getPackageName())) apps.add(getPackageName());
@@ -100,17 +118,35 @@ public final class PipidastrVpnService extends VpnService {
             LibXray.registerDialerController(controller);
             LibXray.setDNS(controller, "1.1.1.1:53");
             dnsConfigured = true;
-            coreStartAttempted = true;
-            invoke("runXray", new JSONObject()
-                    .put("xrayJson", XrayConfig.withTunFd(config, tun.getFd())));
-            coreStarted = true;
-
-            showForeground("Проверка соединения…");
-            updateStatus("connecting", "Проверяю доступ к сайтам…");
-            if (!verifyConnectivity())
-                throw new IllegalStateException("Сервер не передаёт трафик. Выберите другой сервер.");
+            boolean verified = false;
+            String reserveUsed = null;
+            if (!findReserve) {
+                updateStatus("connecting", "Проверяю прямое подключение…");
+                verified = runAndVerify(config);
+            }
+            if (!verified && !closing.get() && candidates != null) {
+                Network physical = underlyingNetwork();
+                for (int index = 0; index < candidates.length && !closing.get(); index++) {
+                    SubscriptionParser.Server candidate;
+                    try { candidate = SubscriptionParser.parse(candidates[index]).servers.get(0); }
+                    catch (Exception ignored) { continue; }
+                    if (!canReach(physical, candidate)) continue;
+                    updateStatus("connecting", "Проверяю резерв " + (index + 1) + "/" + candidates.length + ": " + candidate.name);
+                    try { verified = runAndVerify(XrayConfig.throughReserve(config, candidate)); }
+                    catch (Exception ex) { Log.w(TAG, "Reserve core failed: " + ex.getClass().getSimpleName()); }
+                    if (verified) {
+                        reserveUsed = candidate.name;
+                        getSharedPreferences("MainActivity", MODE_PRIVATE).edit()
+                                .putString("reserve_link", candidate.link).putString("reserve_name", candidate.name).apply();
+                        Log.i(TAG, "HTTPS verified through reserve");
+                        break;
+                    }
+                }
+            }
+            if (closing.get()) { stopCore(); return; }
+            if (!verified) throw new IllegalStateException("HTTPS через сервер не отвечает. Прямое подключение и доступные резервы проверены.");
             showForeground("Подключено");
-            updateStatus("connected", "VPN подключён");
+            updateStatus("connected", "VPN подключён" + (reserveUsed == null ? "" : " · резерв: " + reserveUsed));
         } catch (Exception ex) {
             Log.e(TAG, "VPN start failed", ex);
             updateStatus("error", "Ошибка подключения: " + ex.getMessage());
@@ -119,7 +155,14 @@ public final class PipidastrVpnService extends VpnService {
     }
 
     private void stopCore() {
-        if (!closing.compareAndSet(false, true)) return;
+        closing.set(true);
+        releaseCore();
+        if (!"error".equals(currentState)) updateStatus("disconnected", "Не подключено");
+        stopForeground(STOP_FOREGROUND_REMOVE);
+        stopSelf();
+    }
+
+    private void releaseCore() {
         if (coreStartAttempted) {
             try { invoke("stopXray", new JSONObject()); }
             catch (Exception ex) { Log.w(TAG, "stop Xray", ex); }
@@ -134,9 +177,39 @@ public final class PipidastrVpnService extends VpnService {
         tun = null;
         if (descriptor != null) try { descriptor.close(); }
         catch (Exception ex) { Log.w(TAG, "close TUN", ex); }
-        if (!"error".equals(currentState)) updateStatus("disconnected", "Не подключено");
-        stopForeground(STOP_FOREGROUND_REMOVE);
-        stopSelf();
+    }
+
+    private boolean runAndVerify(String config) throws Exception {
+        if (coreStartAttempted) {
+            invoke("stopXray", new JSONObject());
+            coreStartAttempted = false;
+            coreStarted = false;
+        }
+        if (closing.get()) return false;
+        coreStartAttempted = true;
+        invoke("runXray", new JSONObject().put("xrayJson", XrayConfig.withTunFd(config, tun.getFd())));
+        coreStarted = true;
+        showForeground("Проверка соединения…");
+        boolean result = verifyConnectivity();
+        Log.i(TAG, "HTTPS connectivity: " + (result ? "OK" : "failed"));
+        return result;
+    }
+
+    private Network underlyingNetwork() {
+        for (Network network : connectivity.getAllNetworks()) {
+            NetworkCapabilities caps = connectivity.getNetworkCapabilities(network);
+            if (caps != null && !caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN) &&
+                    caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)) return network;
+        }
+        return null;
+    }
+
+    private boolean canReach(Network network, SubscriptionParser.Server server) {
+        if (network == null || !"VLESS".equalsIgnoreCase(server.protocol)) return false;
+        try (Socket socket = network.getSocketFactory().createSocket()) {
+            socket.connect(new InetSocketAddress(network.getByName(server.host), server.port), 1200);
+            return true;
+        } catch (Exception ignored) { return false; }
     }
 
     private static JSONObject invoke(String method, JSONObject payload) throws Exception {
@@ -177,6 +250,7 @@ public final class PipidastrVpnService extends VpnService {
     }
 
     private void updateStatus(String state, String message) {
+        Log.i(TAG, state + ": " + message);
         currentState = state;
         currentMessage = message;
         sendBroadcast(new Intent(ACTION_STATUS).setPackage(getPackageName())
@@ -207,16 +281,22 @@ public final class PipidastrVpnService extends VpnService {
             catch (InterruptedException ex) { Thread.currentThread().interrupt(); return false; }
         }
         if (vpnNetwork == null) return false;
-        for (int attempt = 0; attempt < 3; attempt++) {
-            for (String address : new String[] {"https://example.com", "https://yandex.ru"}) {
+        for (int attempt = 0; attempt < 1 && !closing.get(); attempt++) {
+            for (String address : new String[] {"https://www.cloudflare.com/cdn-cgi/trace", "https://api.ipify.org"}) {
+                if (closing.get()) return false;
                 HttpURLConnection connection = null;
                 try {
                     connection = (HttpURLConnection) vpnNetwork.openConnection(new URL(address));
-                    connection.setConnectTimeout(6000);
-                    connection.setReadTimeout(6000);
+                    connection.setConnectTimeout(5000);
+                    connection.setReadTimeout(5000);
                     connection.setInstanceFollowRedirects(false);
                     int response = connection.getResponseCode();
-                    if (response >= 200 && response < 400) return true;
+                    if (response == 200) {
+                        byte[] body = new byte[4096];
+                        int length = connection.getInputStream().read(body);
+                        String text = length < 0 ? "" : new String(body, 0, length, java.nio.charset.StandardCharsets.UTF_8).trim();
+                        if (text.contains("ip=") || text.matches("[0-9a-fA-F:.]+")) return true;
+                    }
                     Log.w(TAG, "VPN connectivity check returned HTTP " + response);
                 } catch (Exception ex) {
                     Log.w(TAG, "VPN connectivity check failed: " + ex.getClass().getSimpleName());

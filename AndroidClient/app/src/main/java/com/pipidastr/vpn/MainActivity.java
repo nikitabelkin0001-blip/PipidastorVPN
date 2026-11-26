@@ -83,6 +83,11 @@ public final class MainActivity extends Activity {
     private TextView serverDetails;
     private TextView serverCount;
     private Button refresh;
+    private Button pingButton;
+    private Button reserveButton;
+    private final Map<String, String> latency = new HashMap<>();
+    private volatile boolean pingRunning;
+    private boolean findReserve;
     private ListView serverList;
     private EditText serverSearch;
     private boolean wideLayout;
@@ -204,7 +209,7 @@ public final class MainActivity extends Activity {
         if (wide) sidebar.addView(showQr, showQrParams);
 
         refresh = new Button(this);
-        refresh.setText("Обновить серверы");
+        refresh.setText("Обновить подписку");
         refresh.setTextSize(14);
         refresh.setTextColor(Color.WHITE);
         refresh.setAllCaps(false);
@@ -227,7 +232,8 @@ public final class MainActivity extends Activity {
                 SubscriptionParser.Server server = getItem(position);
                 boolean compatible = compatibleLinks.contains(server.link);
                 item.setText(server.name + "\n" + server.host + ":" + server.port + " · " +
-                        server.protocol + (compatible ? "" : " · не поддерживается"));
+                        server.protocol + (compatible ? "" : " · не поддерживается") +
+                        (latency.containsKey(server.link) ? " · " + latency.get(server.link) : ""));
                 item.setTextSize(wide ? 14 : 15);
                 item.setTextColor(compatible ? Color.WHITE : MUTED);
                 item.setGravity(Gravity.CENTER_VERTICAL);
@@ -450,12 +456,36 @@ public final class MainActivity extends Activity {
 
             updateSelectedApps();
         }
+        // Keep actions beside the server list on both phone and TV.
+        if (refresh.getParent() instanceof ViewGroup)
+            ((ViewGroup) refresh.getParent()).removeView(refresh);
+        LinearLayout serverActions = new LinearLayout(this);
+        pingButton = dialogButton("Тест пинга", FIELD);
+        pingButton.setTextSize(12);
+        refresh.setTextSize(12);
+        LinearLayout.LayoutParams halfAction = new LinearLayout.LayoutParams(0, dp(42), 1);
+        halfAction.rightMargin = dp(5);
+        serverActions.addView(pingButton, halfAction);
+        serverActions.addView(refresh, new LinearLayout.LayoutParams(0, dp(42), 1));
+        pingButton.setOnClickListener(view -> testLatency());
+        sidebar.addView(serverActions, sidebar.indexOfChild(list));
+        reserveButton = dialogButton("Найти резервный сервер", FIELD);
+        reserveButton.setTextSize(12);
+        reserveButton.setId(View.generateViewId());
+        LinearLayout.LayoutParams reserveParams = new LinearLayout.LayoutParams(-1, dp(40));
+        reserveParams.bottomMargin = dp(5);
+        sidebar.addView(reserveButton, sidebar.indexOfChild(list), reserveParams);
+        reserveButton.setOnClickListener(view -> {
+            if ("connecting".equals(displayedVpnState)) { toggleVpn(); return; }
+            findReserve = true;
+            toggleVpn();
+        });
         restoreServer();
         refreshConnectButton();
         updateConnectionUi(PipidastrVpnService.currentState, PipidastrVpnService.currentMessage);
         Intent incoming = getIntent();
         handleIncomingIntent(incoming);
-        if (wide && isTvLauncherIntent(incoming) && selectedServer >= 0) {
+        if (wide && isQuickToggleIntent(incoming) && selectedServer >= 0) {
             tvQuickToggle = true;
             toggleVpn();
             if (VpnService.prepare(this) == null) finish();
@@ -470,16 +500,15 @@ public final class MainActivity extends Activity {
         super.onNewIntent(intent);
         setIntent(intent);
         handleIncomingIntent(intent);
-        if (wideLayout && isTvLauncherIntent(intent) && selectedServer >= 0) {
+        if (wideLayout && isQuickToggleIntent(intent) && selectedServer >= 0) {
             tvQuickToggle = true;
             toggleVpn();
             if (VpnService.prepare(this) == null) finish();
         }
     }
 
-    private static boolean isTvLauncherIntent(Intent intent) {
-        return intent != null && Intent.ACTION_MAIN.equals(intent.getAction()) &&
-                intent.hasCategory(Intent.CATEGORY_LEANBACK_LAUNCHER);
+    private static boolean isQuickToggleIntent(Intent intent) {
+        return intent != null && "com.pipidastr.vpn.action.TOGGLE".equals(intent.getAction());
     }
 
     private void handleIncomingIntent(Intent intent) {
@@ -798,7 +827,9 @@ public final class MainActivity extends Activity {
         boolean enabled = !busy && (connected || supported);
         connectButton.setEnabled(enabled);
         connectButton.setAlpha(enabled ? 1f : 0.65f);
-        connectButton.setText(busy ? "Подключение…" : connected ? "Отключить" : "Подключить");
+        connectButton.setEnabled(connected || busy || supported);
+        connectButton.setText(busy ? "Отменить" : connected ? "Отключить" : "Подключить");
+        if (reserveButton != null) reserveButton.setText(busy ? "Отменить поиск" : "Найти резервный сервер");
     }
 
     private void updateConnectionUi(String state, String message) {
@@ -810,12 +841,13 @@ public final class MainActivity extends Activity {
         connectionBadge.setText(connected ? "ПОДКЛЮЧЕНО" : connecting ? "ПОДКЛЮЧЕНИЕ" :
                 error ? "ОШИБКА" : "НЕ ПОДКЛЮЧЕНО");
         connectionHeading.setText(connected ? "Подключено" : connecting ? "Подключаю…" : "Не подключено");
-        connectionMessage.setText(error && message != null ? message : "");
+        connectionMessage.setText(message == null ? "" : message);
         refreshConnectButton();
     }
 
     private void toggleVpn() {
-        if ("connected".equals(displayedVpnState)) {
+        if (("connected".equals(displayedVpnState) && !findReserve) || "connecting".equals(displayedVpnState)) {
+            findReserve = false;
             startService(new Intent(this, PipidastrVpnService.class)
                     .setAction(PipidastrVpnService.ACTION_STOP));
             updateConnectionUi("connecting", "Отключаю…");
@@ -1054,17 +1086,77 @@ public final class MainActivity extends Activity {
     private void startVpn() {
         try {
             String config = XrayConfig.build(servers.get(selectedServer));
+            List<String> reserves = new ArrayList<>();
+            String savedReserve = getPreferences(MODE_PRIVATE).getString("reserve_link", "");
+            String primary = servers.get(selectedServer).link;
+            if (!savedReserve.isEmpty() && !savedReserve.equals(primary)) reserves.add(savedReserve);
+            for (SubscriptionParser.Server server : servers)
+                if (!server.link.equals(primary) && "VLESS".equalsIgnoreCase(server.protocol) &&
+                        compatibleLinks.contains(server.link) && !reserves.contains(server.link)) reserves.add(server.link);
             String[] packages = getPreferences(MODE_PRIVATE)
                     .getStringSet("selected_apps", new HashSet<>()).toArray(new String[0]);
             Intent intent = new Intent(this, PipidastrVpnService.class)
                     .setAction(PipidastrVpnService.ACTION_START)
                     .putExtra(PipidastrVpnService.EXTRA_CONFIG, config)
-                    .putExtra(PipidastrVpnService.EXTRA_PACKAGES, packages);
+                    .putExtra(PipidastrVpnService.EXTRA_PACKAGES, packages)
+                    .putExtra(PipidastrVpnService.EXTRA_CANDIDATES, reserves.toArray(new String[0]))
+                    .putExtra(PipidastrVpnService.EXTRA_FIND_RESERVE, findReserve);
+            findReserve = false;
             startForegroundService(intent);
             updateConnectionUi("connecting", "Подключаю сервер…");
         } catch (Exception ex) {
             connectionMessage.setText(ex.getMessage());
         }
+    }
+
+    private void testLatency() {
+        if (pingRunning) {
+            pingRunning = false;
+            pingButton.setText("Отмена…");
+            pingButton.setEnabled(false);
+            return;
+        }
+        pingRunning = true;
+        pingButton.setText("Отменить тест");
+        List<SubscriptionParser.Server> snapshot = new ArrayList<>(servers);
+        android.net.ConnectivityManager manager = (android.net.ConnectivityManager)
+                getSystemService(CONNECTIVITY_SERVICE);
+        android.net.Network physical = null;
+        for (android.net.Network network : manager.getAllNetworks()) {
+            android.net.NetworkCapabilities caps = manager.getNetworkCapabilities(network);
+            if (caps != null && !caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_VPN) &&
+                    caps.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET)) {
+                physical = network; break;
+            }
+        }
+        final android.net.Network network = physical;
+        worker.execute(() -> {
+            ExecutorService probes = Executors.newFixedThreadPool(6);
+            try {
+                List<java.util.concurrent.Future<?>> tasks = new ArrayList<>();
+                for (SubscriptionParser.Server server : snapshot) tasks.add(probes.submit(() -> {
+                    if (!pingRunning) return;
+                    String result = "недоступен";
+                    if (!"VLESS".equalsIgnoreCase(server.protocol)) result = "UDP";
+                    else if (network != null) try (java.net.Socket socket = network.getSocketFactory().createSocket()) {
+                        long start = android.os.SystemClock.elapsedRealtime();
+                        socket.connect(new java.net.InetSocketAddress(network.getByName(server.host), server.port), 3000);
+                        result = Math.max(1, android.os.SystemClock.elapsedRealtime() - start) + " мс";
+                    } catch (Exception ignored) { }
+                    final String label = result;
+                    runOnUiThread(() -> { latency.put(server.link, label); adapter.notifyDataSetChanged(); });
+                }));
+                for (java.util.concurrent.Future<?> task : tasks) task.get();
+            } catch (Exception ignored) { }
+            finally {
+                probes.shutdownNow();
+                runOnUiThread(() -> {
+                    pingRunning = false;
+                    pingButton.setText("Тест пинга");
+                    pingButton.setEnabled(true);
+                });
+            }
+        });
     }
 
     @Override public void onBackPressed() {
@@ -1287,6 +1379,7 @@ public final class MainActivity extends Activity {
     }
 
     @Override protected void onDestroy() {
+        pingRunning = false;
         if (pairingSession != null) pairingSession.close();
         worker.shutdownNow();
         super.onDestroy();

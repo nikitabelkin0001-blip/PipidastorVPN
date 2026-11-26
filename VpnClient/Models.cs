@@ -4,10 +4,18 @@ namespace VpnClient;
 
 public enum TrafficMode { SelectedApps, FullTunnel }
 
-public sealed class ServerEntry
+public sealed class ServerEntry : System.ComponentModel.INotifyPropertyChanged
 {
     public string Name { get; set; } = "Сервер";
     public string Link { get; set; } = "";
+    private string latencyText = "";
+    [System.Text.Json.Serialization.JsonIgnore]
+    public string LatencyText
+    {
+        get => latencyText;
+        set { latencyText = value; PropertyChanged?.Invoke(this, new(nameof(LatencyText))); }
+    }
+    public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
     public string Details => Uri.TryCreate(Link, UriKind.Absolute, out var uri)
         ? $"{uri.Host}:{uri.Port}  ·  {(uri.Scheme == "hysteria2" ? "Hysteria2" : "VLESS")}"
         : "VLESS";

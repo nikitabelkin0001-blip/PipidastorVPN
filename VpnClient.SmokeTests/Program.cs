@@ -144,6 +144,53 @@ foreach (var (name, xrayConfig) in new[]
     }
     finally { File.Delete(xrayTemp); }
 }
+using (var directProbe = JsonDocument.Parse(BootstrapDiscovery.BuildProbeConfig(node, null, 10880, 10881, "192.0.2.2", "Wi-Fi")))
+{
+    var outer = directProbe.RootElement.GetProperty("outbounds")[0];
+    if (outer.GetProperty("sendThrough").GetString() != "192.0.2.2" ||
+        outer.GetProperty("streamSettings").GetProperty("sockopt").GetProperty("interface").GetString() != "Wi-Fi")
+        throw new Exception("Reserve probe is not bound to physical network");
+}
+using (var chainProbe = JsonDocument.Parse(BootstrapDiscovery.BuildProbeConfig(node, tlsNode, 10880, 10881, "192.0.2.2", "Wi-Fi")))
+{
+    var routes = chainProbe.RootElement.GetProperty("outbounds");
+    if (routes.GetArrayLength() != 2 ||
+        routes[0].GetProperty("streamSettings").GetProperty("sockopt").GetProperty("dialerProxy").GetString() != "bootstrap" ||
+        routes[0].TryGetProperty("sendThrough", out _) ||
+        routes[1].GetProperty("sendThrough").GetString() != "192.0.2.2")
+        throw new Exception("Reserve probe lost chain or physical outer route");
+}
+var listener = new System.Net.Sockets.TcpListener(IPAddress.Loopback, 0);
+listener.Start();
+var latencyPort = ((IPEndPoint)listener.LocalEndpoint).Port;
+try
+{
+    if (await ServerLatencyProbe.MeasureAsync("127.0.0.1", latencyPort) is not > 0)
+        throw new Exception("Reachable local server latency missing");
+    using var accepted = await listener.AcceptTcpClientAsync();
+}
+finally { listener.Stop(); }
+if (await ServerLatencyProbe.MeasureAsync("127.0.0.1", latencyPort) != null)
+    throw new Exception("Closed TCP port reported available");
+using (var cancelled = new CancellationTokenSource())
+{
+    cancelled.Cancel();
+    try { await ServerLatencyProbe.MeasureAsync("127.0.0.1", latencyPort, cancelled.Token); throw new Exception("Latency cancellation ignored"); }
+    catch (OperationCanceledException) { }
+}
+if (JsonSerializer.Serialize(new ServerEntry { LatencyText = "123 мс" }).Contains("LatencyText"))
+    throw new Exception("Transient latency must not be stored in profiles");
+using (var ownedProcess = new Process { StartInfo = new ProcessStartInfo("cmd.exe", "/c ping -n 60 127.0.0.1 > nul") { UseShellExecute = false, CreateNoWindow = true } })
+{
+    using (var job = new EngineJob())
+    {
+        ownedProcess.Start();
+        job.Track(ownedProcess);
+        if (ownedProcess.HasExited) throw new Exception("Engine unexpectedly exited before job cleanup");
+    }
+    using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+    await ownedProcess.WaitForExitAsync(deadline.Token);
+}
 Console.WriteLine("VLESS and Hysteria2, subscription, automatic device ID, Discord migration, routing, sing-box and Xray config checks: OK");
 
 sealed class StubHandler(Func<HttpRequestMessage, HttpResponseMessage> reply) : HttpMessageHandler

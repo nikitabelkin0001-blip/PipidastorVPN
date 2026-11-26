@@ -38,4 +38,18 @@ final class XrayConfig {
                 .put("env", new JSONObject().put("xray.tun.fd", Integer.toString(fd)))
                 .toString();
     }
+
+    static String throughReserve(String config, SubscriptionParser.Server reserve) throws Exception {
+        JSONObject result = new JSONObject(config);
+        JSONObject outer = new JSONObject(build(reserve)).getJSONArray("outbounds")
+                .getJSONObject(0).put("tag", "bootstrap");
+        JSONObject primary = result.getJSONArray("outbounds").getJSONObject(0);
+        JSONObject stream = primary.optJSONObject("streamSettings");
+        if (stream == null) { stream = new JSONObject(); primary.put("streamSettings", stream); }
+        JSONObject socket = stream.optJSONObject("sockopt");
+        if (socket == null) { socket = new JSONObject(); stream.put("sockopt", socket); }
+        socket.put("dialerProxy", "bootstrap");
+        result.getJSONArray("outbounds").put(outer);
+        return result.toString();
+    }
 }

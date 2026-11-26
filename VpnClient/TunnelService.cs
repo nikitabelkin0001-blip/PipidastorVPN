@@ -11,6 +11,7 @@ namespace VpnClient;
 public sealed class TunnelService : IDisposable
 {
     private readonly object gate = new();
+    private readonly Lazy<EngineJob> engineJob = new(() => new EngineJob());
     private readonly Queue<string> recentLog = new();
     private Process? xray;
     private Process? singBox;
@@ -135,6 +136,13 @@ public sealed class TunnelService : IDisposable
         };
         foreach (var arg in args) info.ArgumentList.Add(arg);
         var process = Process.Start(info) ?? throw new IOException($"Не удалось запустить {label}.");
+        try { engineJob.Value.Track(process); }
+        catch
+        {
+            try { if (!process.HasExited) { process.Kill(entireProcessTree: true); process.WaitForExit(); } }
+            finally { process.Dispose(); }
+            throw;
+        }
         process.OutputDataReceived += (_, e) => { if (e.Data != null) Record(label, e.Data); };
         process.ErrorDataReceived += (_, e) => { if (e.Data != null) Record(label, e.Data); };
         process.EnableRaisingEvents = true;
@@ -280,5 +288,9 @@ public sealed class TunnelService : IDisposable
         finally { process.Dispose(); }
     }
 
-    public void Dispose() => Stop();
+    public void Dispose()
+    {
+        Stop();
+        if (engineJob.IsValueCreated) engineJob.Value.Dispose();
+    }
 }
